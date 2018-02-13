@@ -16,13 +16,13 @@
 #include <rte_mempool.h>
 #include <rte_prefetch.h>
 
-#include "mlx5.h"
-#include "mlx5_utils.h"
-#include "mlx5_rxtx.h"
-#include "mlx5_rxtx_vec.h"
-#include "mlx5_autoconf.h"
-#include "mlx5_defs.h"
-#include "mlx5_prm.h"
+#include "mlx5_mdev.h"
+#include "mlx5_mdev_utils.h"
+#include "mlx5_mdev_rxtx.h"
+#include "mlx5_mdev_rxtx_vec.h"
+#include "mlx5_mdev_autoconf.h"
+#include "mlx5_mdev_defs.h"
+#include "mlx5_mdev_prm.h"
 
 #ifndef __INTEL_COMPILER
 #pragma GCC diagnostic ignored "-Wcast-qual"

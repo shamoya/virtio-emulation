@@ -27,13 +27,12 @@
 #include <rte_hexdump.h>
 #include <rte_atomic.h>
 
-#include "mlx5_utils.h"
-#include "mlx5.h"
-#include "mlx5_autoconf.h"
-#include "mlx5_defs.h"
-#include "mlx5_prm.h"
+#include "mlx5_mdev_utils.h"
+#include "mlx5_mdev.h"
+#include "mlx5_mdev_autoconf.h"
+#include "mlx5_mdev_defs.h"
+#include "mlx5_mdev_prm.h"
 
-#if 0
 struct mlx5_rxq_stats {
 	unsigned int idx; /**< Mapping index. */
 #ifdef MLX5_PMD_SOFT_COUNTERS
@@ -43,7 +42,6 @@ struct mlx5_rxq_stats {
 	uint64_t idropped; /**< Total of packets dropped when RX ring full. */
 	uint64_t rx_nombuf; /**< Total of RX mbuf allocation failures. */
 };
-#endif
 
 struct mlx5_txq_stats {
 	unsigned int idx; /**< Mapping index. */
@@ -67,7 +65,6 @@ struct mlx5_mr {
 	struct rte_mempool *mp; /*<< Memory Pool. */
 };
 
-#if 0
 /* Compressed CQE context. */
 struct rxq_zip {
 	uint16_t ai; /* Array index. */
@@ -150,7 +147,6 @@ struct mlx5_hrxq {
 	uint8_t rss_key_len; /* Hash key length in bytes. */
 	uint8_t rss_key[]; /* Hash key. */
 };
-#endif
 
 /* TX queue descriptor. */
 __extension__
@@ -209,7 +205,6 @@ struct mlx5_txq_ctrl {
 	volatile void *bf_reg_orig; /* Blueflame register from verbs. */
 };
 
-#if 0
 /* mlx5_rxq.c */
 
 extern uint8_t rss_hash_default_key[];
@@ -253,7 +248,6 @@ int mlx5_priv_hrxq_release(struct priv *, struct mlx5_hrxq *);
 int mlx5_priv_hrxq_ibv_verify(struct priv *);
 uint64_t mlx5_priv_get_rx_port_offloads(struct priv *);
 uint64_t mlx5_priv_get_rx_queue_offloads(struct priv *);
-#endif
 
 /* mlx5_txq.c */
 
@@ -291,7 +285,6 @@ uint16_t removed_rx_burst(void *, struct rte_mbuf **, uint16_t);
 int mlx5_rx_descriptor_status(void *, uint16_t);
 int mlx5_tx_descriptor_status(void *, uint16_t);
 
-#if 0
 /* Vectorized version of mlx5_rxtx.c */
 int priv_check_raw_vec_tx_support(struct priv *, struct rte_eth_dev *);
 int priv_check_vec_tx_support(struct priv *, struct rte_eth_dev *);
@@ -308,7 +301,6 @@ struct mlx5_mr *priv_txq_mp2mr_reg(struct priv *priv, struct mlx5_txq_data *,
 				   struct rte_mempool *, unsigned int);
 struct mlx5_mr *mlx5_txq_mp2mr_reg(struct mlx5_txq_data *, struct rte_mempool *,
 				   unsigned int);
-#endif
 
 #ifndef NDEBUG
 /**

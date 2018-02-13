@@ -8,6 +8,17 @@
 #include <string.h>
 #include <stdlib.h>
 
+/* Verbs header. */
+/* ISO C doesn't support unnamed structs/unions, disabling -pedantic. */
+#ifdef PEDANTIC
+#pragma GCC diagnostic ignored "-Wpedantic"
+#endif
+#include <infiniband/verbs.h>
+#include <infiniband/mlx5dv.h>
+#ifdef PEDANTIC
+#pragma GCC diagnostic error "-Wpedantic"
+#endif
+
 #include <rte_mbuf.h>
 #include <rte_mempool.h>
 #include <rte_prefetch.h>
@@ -16,13 +27,12 @@
 #include <rte_ether.h>
 
 #include "mlx5_mdev.h"
-//#include "mlx5_utils.h"
+#include "mlx5_mdev_utils.h"
 #include "mlx5_mdev_rxtx.h"
-//#include "mlx5_autoconf.h"
-//#include "mlx5_defs.h"
-//#include "mlx5_prm.h"
+#include "mlx5_mdev_autoconf.h"
+#include "mlx5_mdev_defs.h"
+#include "mlx5_mdev_prm.h"
 
-#if 0
 static __rte_always_inline uint32_t
 rxq_cq_to_pkt_type(volatile struct mlx5_cqe *cqe);
 
@@ -152,8 +162,6 @@ mlx5_set_ptype_table(void)
 		     RTE_PTYPE_INNER_L4_UDP;
 }
 
-#endif
-
 /**
  * Return the size of tailroom of WQ.
  *
@@ -234,7 +242,6 @@ mlx5_tx_descriptor_status(void *tx_queue, uint16_t offset)
 	return RTE_ETH_TX_DESC_DONE;
 }
 
-#if 0
 /**
  * DPDK callback to check the status of a rx descriptor.
  *
@@ -284,7 +291,6 @@ mlx5_rx_descriptor_status(void *rx_queue, uint16_t offset)
 		return RTE_ETH_RX_DESC_DONE;
 	return RTE_ETH_RX_DESC_AVAIL;
 }
-#endif
 
 /**
  * DPDK callback for TX.
@@ -1532,7 +1538,6 @@ mlx5_tx_burst_empw(void *dpdk_txq, struct rte_mbuf **pkts, uint16_t pkts_n)
 	return nb_tx;
 }
 
-#if 0
 /**
  * Translate RX completion flags to packet type.
  *
@@ -1877,8 +1882,6 @@ skip:
 	return i;
 }
 
-#endif
-
 /**
  * Dummy DPDK callback for TX.
  *
@@ -1904,7 +1907,6 @@ removed_tx_burst(void *dpdk_txq, struct rte_mbuf **pkts, uint16_t pkts_n)
 	return 0;
 }
 
-#if 0
 /**
  * Dummy DPDK callback for RX.
  *
@@ -1929,7 +1931,6 @@ removed_rx_burst(void *dpdk_rxq, struct rte_mbuf **pkts, uint16_t pkts_n)
 	(void)pkts_n;
 	return 0;
 }
-#endif
 
 /*
  * Vectorized Rx/Tx routines are not compiled in when required vector
@@ -1956,7 +1957,6 @@ mlx5_tx_burst_vec(void *dpdk_txq, struct rte_mbuf **pkts, uint16_t pkts_n)
 	return 0;
 }
 
-#if 0
 uint16_t __attribute__((weak))
 mlx5_rx_burst_vec(void *dpdk_rxq, struct rte_mbuf **pkts, uint16_t pkts_n)
 {
@@ -1965,7 +1965,6 @@ mlx5_rx_burst_vec(void *dpdk_rxq, struct rte_mbuf **pkts, uint16_t pkts_n)
 	(void)pkts_n;
 	return 0;
 }
-#endif
 
 int __attribute__((weak))
 priv_check_raw_vec_tx_support(struct priv *priv, struct rte_eth_dev *dev)
@@ -1983,7 +1982,6 @@ priv_check_vec_tx_support(struct priv *priv, struct rte_eth_dev *dev)
 	return -ENOTSUP;
 }
 
-#if 0
 int __attribute__((weak))
 rxq_check_vec_support(struct mlx5_rxq_data *rxq)
 {
@@ -1997,4 +1995,3 @@ priv_check_vec_rx_support(struct priv *priv)
 	(void)priv;
 	return -ENOTSUP;
 }
-#endif

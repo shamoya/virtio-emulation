@@ -35,10 +35,10 @@
 #include <rte_alarm.h>
 #include <rte_malloc.h>
 
-#include "mlx5.h"
-#include "mlx5_glue.h"
-#include "mlx5_rxtx.h"
-#include "mlx5_utils.h"
+#include "mlx5_mdev.h"
+#include "mlx5_mdev_glue.h"
+#include "mlx5_mdev_rxtx.h"
+#include "mlx5_mdev_utils.h"
 
 /* Add defines in case the running kernel is not the same as user headers. */
 #ifndef ETHTOOL_GLINKSETTINGS

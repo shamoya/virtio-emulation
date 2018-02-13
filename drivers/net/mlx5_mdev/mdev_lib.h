@@ -5,7 +5,7 @@
 #ifndef MDEV_LIB_H_
 #define MDEV_LIB_H_
 
-#include "../../../lib/librte_eal/common/include/rte_memory.h"
+#include <rte_memory.h>
 #include "mdev_prm.h"
 
 #define MDEV_DEBUG(f_,...) printf((f_), __VA_ARGS__)

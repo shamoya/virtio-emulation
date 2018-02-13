@@ -38,28 +38,27 @@ LIB_GLUE_BASE = librte_pmd_mlx5_mdev_glue.so
 LIB_GLUE_VERSION = 18.02.0
 
 # Sources.
-SRCS-$(CONFIG_RTE_LIBRTE_MLX5_MDEV_PMD) += mlx5.c
+SRCS-$(CONFIG_RTE_LIBRTE_MLX5_MDEV_PMD) += mlx5_mdev.c
 ifneq ($(CONFIG_RTE_LIBRTE_MLX5_MDEV_DLOPEN_DEPS),y)
-SRCS-$(CONFIG_RTE_LIBRTE_MLX5_MDEV_PMD) += mlx5_glue.c
+SRCS-$(CONFIG_RTE_LIBRTE_MLX5_MDEV_PMD) += mlx5_mdev_glue.c
 endif
-SRCS-$(CONFIG_RTE_LIBRTE_MLX5_MDEV_PMD) += mlx5_rxq.c
-SRCS-$(CONFIG_RTE_LIBRTE_MLX5_MDEV_PMD) += mlx5_txq.c
-SRCS-$(CONFIG_RTE_LIBRTE_MLX5_MDEV_PMD) += mlx5_rxtx.c
+SRCS-$(CONFIG_RTE_LIBRTE_MLX5_MDEV_PMD) += mlx5_mdev_rxq.c
+SRCS-$(CONFIG_RTE_LIBRTE_MLX5_MDEV_PMD) += mlx5_mdev_txq.c
+SRCS-$(CONFIG_RTE_LIBRTE_MLX5_MDEV_PMD) += mlx5_mdev_rxtx.c
 ifneq ($(filter y,$(CONFIG_RTE_ARCH_X86_64) \
 		  $(CONFIG_RTE_ARCH_ARM64)),)
-SRCS-$(CONFIG_RTE_LIBRTE_MLX5_MDEV_PMD) += mlx5_rxtx_vec.c
+SRCS-$(CONFIG_RTE_LIBRTE_MLX5_MDEV_PMD) += mlx5_mdev_rxtx_vec.c
 endif
-SRCS-$(CONFIG_RTE_LIBRTE_MLX5_MDEV_PMD) += mlx5_trigger.c
-SRCS-$(CONFIG_RTE_LIBRTE_MLX5_MDEV_PMD) += mlx5_ethdev.c
-SRCS-$(CONFIG_RTE_LIBRTE_MLX5_MDEV_PMD) += mlx5_mac.c
-SRCS-$(CONFIG_RTE_LIBRTE_MLX5_MDEV_PMD) += mlx5_rxmode.c
-SRCS-$(CONFIG_RTE_LIBRTE_MLX5_MDEV_PMD) += mlx5_vlan.c
-SRCS-$(CONFIG_RTE_LIBRTE_MLX5_MDEV_PMD) += mlx5_stats.c
-SRCS-$(CONFIG_RTE_LIBRTE_MLX5_MDEV_PMD) += mlx5_rss.c
-SRCS-$(CONFIG_RTE_LIBRTE_MLX5_MDEV_PMD) += mlx5_mr.c
-SRCS-$(CONFIG_RTE_LIBRTE_MLX5_MDEV_PMD) += mlx5_flow.c
-SRCS-$(CONFIG_RTE_LIBRTE_MLX5_MDEV_PMD) += mlx5_socket.c
-#SRCS-$(CONFIG_RTE_LIBRTE_MLX5_MDEV_PMD) += mlx5_mdev.c
+SRCS-$(CONFIG_RTE_LIBRTE_MLX5_MDEV_PMD) += mlx5_mdev_trigger.c
+SRCS-$(CONFIG_RTE_LIBRTE_MLX5_MDEV_PMD) += mlx5_mdev_ethdev.c
+SRCS-$(CONFIG_RTE_LIBRTE_MLX5_MDEV_PMD) += mlx5_mdev_mac.c
+SRCS-$(CONFIG_RTE_LIBRTE_MLX5_MDEV_PMD) += mlx5_mdev_rxmode.c
+SRCS-$(CONFIG_RTE_LIBRTE_MLX5_MDEV_PMD) += mlx5_mdev_vlan.c
+SRCS-$(CONFIG_RTE_LIBRTE_MLX5_MDEV_PMD) += mlx5_mdev_stats.c
+SRCS-$(CONFIG_RTE_LIBRTE_MLX5_MDEV_PMD) += mlx5_mdev_rss.c
+SRCS-$(CONFIG_RTE_LIBRTE_MLX5_MDEV_PMD) += mlx5_mdev_mr.c
+SRCS-$(CONFIG_RTE_LIBRTE_MLX5_MDEV_PMD) += mlx5_mdev_flow.c
+SRCS-$(CONFIG_RTE_LIBRTE_MLX5_MDEV_PMD) += mlx5_mdev_socket.c
 #SRCS-$(CONFIG_RTE_LIBRTE_MLX5_MDEV_PMD) += mdev_lib.c
 #SRCS-$(CONFIG_RTE_LIBRTE_MLX5_MDEV_PMD) += mlx5_mdev_dbrec.c
 #SRCS-$(CONFIG_RTE_LIBRTE_MLX5_MDEV_PMD) += mlx5_prm_commands.c
@@ -80,7 +79,7 @@ CFLAGS += -Wno-strict-prototypes
 ifeq ($(CONFIG_RTE_LIBRTE_MLX5_MDEV_DLOPEN_DEPS),y)
 CFLAGS += -DMLX5_GLUE='"$(LIB_GLUE)"'
 CFLAGS += -DMLX5_GLUE_VERSION='"$(LIB_GLUE_VERSION)"'
-CFLAGS_mlx5_glue.o += -fPIC
+CFLAGS_mlx5_mdev_glue.o += -fPIC
 LDLIBS += -ldl
 else
 LDLIBS += -libverbs -lmlx5
@@ -92,7 +91,7 @@ LDLIBS += -lrte_bus_pci
 # A few warnings cannot be avoided in external headers.
 CFLAGS += -Wno-error=cast-qual
 
-EXPORT_MAP := rte_pmd_mlx5_version.map
+EXPORT_MAP := rte_pmd_mlx5_mdev_version.map
 LIBABIVER := 1
 
 # DEBUG which is usually provided on the command-line may enable
@@ -114,7 +113,7 @@ endif
 
 include $(RTE_SDK)/mk/rte.lib.mk
 
-# Generate and clean-up mlx5_autoconf.h.
+# Generate and clean-up mlx5_mdev_autoconf.h.
 
 export CC CFLAGS CPPFLAGS EXTRA_CFLAGS EXTRA_CPPFLAGS
 export AUTO_CONFIG_CFLAGS = -Wno-error
@@ -123,9 +122,9 @@ ifndef V
 AUTOCONF_OUTPUT := >/dev/null
 endif
 
-mlx5_autoconf.h.new: FORCE
+mlx5_mdev_autoconf.h.new: FORCE
 
-mlx5_autoconf.h.new: $(RTE_SDK)/buildtools/auto-config-h.sh
+mlx5_mdev_autoconf.h.new: $(RTE_SDK)/buildtools/auto-config-h.sh
 	$Q $(RM) -f -- '$@'
 	$Q sh -- '$<' '$@' \
 		HAVE_IBV_DEVICE_VXLAN_SUPPORT \
@@ -168,14 +167,14 @@ mlx5_autoconf.h.new: $(RTE_SDK)/buildtools/auto-config-h.sh
 		enum IBV_FLOW_SPEC_ACTION_COUNT \
 		$(AUTOCONF_OUTPUT)
 
-# Create mlx5_autoconf.h or update it in case it differs from the new one.
+# Create mlx5_mdev_autoconf.h or update it in case it differs from the new one.
 
-mlx5_autoconf.h: mlx5_autoconf.h.new
+mlx5_mdev_autoconf.h: mlx5_mdev_autoconf.h.new
 	$Q [ -f '$@' ] && \
 		cmp '$<' '$@' $(AUTOCONF_OUTPUT) || \
 		mv '$<' '$@'
 
-$(SRCS-$(CONFIG_RTE_LIBRTE_MLX5_MDEV_PMD):.c=.o): mlx5_autoconf.h
+$(SRCS-$(CONFIG_RTE_LIBRTE_MLX5_MDEV_PMD):.c=.o): mlx5_mdev_autoconf.h
 
 # Generate dependency plug-in for rdma-core when the PMD must not be linked
 # directly, so that applications do not inherit this dependency.
@@ -184,17 +183,17 @@ ifeq ($(CONFIG_RTE_LIBRTE_MLX5_MDEV_DLOPEN_DEPS),y)
 
 $(LIB): $(LIB_GLUE)
 
-$(LIB_GLUE): mlx5_glue.o
+$(LIB_GLUE): mlx5_mdev_glue.o
 	$Q $(LD) $(LDFLAGS) $(EXTRA_LDFLAGS) \
 		-Wl,-h,$(LIB_GLUE) \
 		-s -shared -o $@ $< -libverbs -lmlx5
 
-mlx5_glue.o: mlx5_autoconf.h
+mlx5_mdev_glue.o: mlx5_mdev_autoconf.h
 
 endif
 
-clean_mlx5: FORCE
-	$Q rm -f -- mlx5_autoconf.h mlx5_autoconf.h.new
-	$Q rm -f -- mlx5_glue.o $(LIB_GLUE_BASE)*
+clean_mlx5_mdev: FORCE
+	$Q rm -f -- mlx5_mdev_autoconf.h mlx5_mdev_autoconf.h.new
+	$Q rm -f -- mlx5_mdev_glue.o $(LIB_GLUE_BASE)*
 
-clean: clean_mlx5
+clean: clean_mlx5_mdev

@@ -10,9 +10,9 @@
 #include <rte_interrupts.h>
 #include <rte_alarm.h>
 
-#include "mlx5.h"
-#include "mlx5_rxtx.h"
-#include "mlx5_utils.h"
+#include "mlx5_mdev.h"
+#include "mlx5_mdev_rxtx.h"
+#include "mlx5_mdev_utils.h"
 
 static void
 priv_txq_stop(struct priv *priv)

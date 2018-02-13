@@ -63,7 +63,7 @@ pmd_drv_log_basename(const char *s)
 
 /*
  * When debugging is enabled (NDEBUG not defined), file, line and function
- * information replace the driver name (MLX5_DRIVER_NAME) in log messages.
+ * information replace the driver name (MLX5_MDEV_DRIVER_NAME) in log messages.
  */
 #ifndef NDEBUG
 
@@ -82,7 +82,7 @@ pmd_drv_log_basename(const char *s)
 #else /* NDEBUG */
 
 #define PMD_DRV_LOG___(level, ...) \
-	ERRNO_SAFE(RTE_LOG(level, PMD, MLX5_DRIVER_NAME ": " __VA_ARGS__))
+	ERRNO_SAFE(RTE_LOG(level, PMD, MLX5_MDEV_DRIVER_NAME ": " __VA_ARGS__))
 #define PMD_DRV_LOG__(level, ...) \
 	PMD_DRV_LOG___(level, __VA_ARGS__)
 #define PMD_DRV_LOG_(level, s, ...) \

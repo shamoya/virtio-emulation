@@ -17,8 +17,8 @@
 #pragma GCC diagnostic error "-Wpedantic"
 #endif
 
-#include "mlx5_autoconf.h"
-#include "mlx5_glue.h"
+#include "mlx5_mdev_autoconf.h"
+#include "mlx5_mdev_glue.h"
 
 static int
 mlx5_glue_fork_init(void)

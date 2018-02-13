@@ -11,7 +11,7 @@
 #include "mlx5_mdev_autoconf.h"
 
 /* Reported driver name. */
-#define MLX5_DRIVER_NAME "net_mlx5"
+#define MLX5_MDEV_DRIVER_NAME "net_mlx5_mdev"
 
 /* Maximum number of simultaneous MAC addresses. */
 #define MLX5_MAX_MAC_ADDRESSES 128

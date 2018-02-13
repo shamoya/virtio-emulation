@@ -30,12 +30,12 @@
 #include <rte_debug.h>
 #include <rte_io.h>
 
-#include "mlx5.h"
-#include "mlx5_rxtx.h"
-#include "mlx5_utils.h"
-#include "mlx5_autoconf.h"
-#include "mlx5_defs.h"
-#include "mlx5_glue.h"
+#include "mlx5_mdev.h"
+#include "mlx5_mdev_rxtx.h"
+#include "mlx5_mdev_utils.h"
+#include "mlx5_mdev_autoconf.h"
+#include "mlx5_mdev_defs.h"
+#include "mlx5_mdev_glue.h"
 
 /* Default RSS hash key also used for ConnectX-3. */
 uint8_t rss_hash_default_key[] = {

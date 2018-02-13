@@ -10,9 +10,9 @@
 #include <rte_common.h>
 #include <rte_malloc.h>
 
-#include "mlx5.h"
-#include "mlx5_rxtx.h"
-#include "mlx5_defs.h"
+#include "mlx5_mdev.h"
+#include "mlx5_mdev_rxtx.h"
+#include "mlx5_mdev_defs.h"
 
 struct mlx5_counter_ctrl {
 	/* Name of the counter. */

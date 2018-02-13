@@ -23,18 +23,18 @@
 #include <rte_mempool.h>
 #include <rte_prefetch.h>
 
-#include "mlx5.h"
-#include "mlx5_utils.h"
-#include "mlx5_rxtx.h"
-#include "mlx5_rxtx_vec.h"
-#include "mlx5_autoconf.h"
-#include "mlx5_defs.h"
-#include "mlx5_prm.h"
+#include "mlx5_mdev.h"
+#include "mlx5_mdev_utils.h"
+#include "mlx5_mdev_rxtx.h"
+#include "mlx5_mdev_rxtx_vec.h"
+#include "mlx5_mdev_autoconf.h"
+#include "mlx5_mdev_defs.h"
+#include "mlx5_mdev_prm.h"
 
 #if defined RTE_ARCH_X86_64
-#include "mlx5_rxtx_vec_sse.h"
+#include "mlx5_mdev_rxtx_vec_sse.h"
 #elif defined RTE_ARCH_ARM64
-#include "mlx5_rxtx_vec_neon.h"
+#include "mlx5_mdev_rxtx_vec_neon.h"
 #else
 #error "This should not be compiled if SIMD instructions are not supported."
 #endif

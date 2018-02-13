@@ -22,9 +22,9 @@
 #include <rte_malloc.h>
 #include <rte_ethdev_driver.h>
 
-#include "mlx5.h"
-#include "mlx5_defs.h"
-#include "mlx5_rxtx.h"
+#include "mlx5_mdev.h"
+#include "mlx5_mdev_defs.h"
+#include "mlx5_mdev_rxtx.h"
 
 /**
  * DPDK callback to update the RSS hash configuration.

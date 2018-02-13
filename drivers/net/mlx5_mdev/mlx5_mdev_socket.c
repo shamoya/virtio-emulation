@@ -12,8 +12,8 @@
 #include <unistd.h>
 #include <sys/stat.h>
 
-#include "mlx5.h"
-#include "mlx5_utils.h"
+#include "mlx5_mdev.h"
+#include "mlx5_mdev_utils.h"
 
 /**
  * Initialise the socket to communicate with the secondary process
@@ -51,7 +51,7 @@ priv_socket_init(struct priv *priv)
 	if (ret < 0)
 		goto out;
 	snprintf(sun.sun_path, sizeof(sun.sun_path), "/var/tmp/%s_%d",
-		 MLX5_DRIVER_NAME, priv->primary_socket);
+		 MLX5_MDEV_DRIVER_NAME, priv->primary_socket);
 	ret = stat(sun.sun_path, &file_stat);
 	if (!ret)
 		claim_zero(remove(sun.sun_path));
@@ -88,7 +88,7 @@ out:
 int
 priv_socket_uninit(struct priv *priv)
 {
-	MKSTR(path, "/var/tmp/%s_%d", MLX5_DRIVER_NAME, priv->primary_socket);
+	MKSTR(path, "/var/tmp/%s_%d", MLX5_MDEV_DRIVER_NAME, priv->primary_socket);
 	claim_zero(close(priv->primary_socket));
 	priv->primary_socket = 0;
 	claim_zero(remove(path));
@@ -216,7 +216,7 @@ priv_socket_connect(struct priv *priv)
 	}
 	socket_fd = ret;
 	snprintf(sun.sun_path, sizeof(sun.sun_path), "/var/tmp/%s_%d",
-		 MLX5_DRIVER_NAME, priv->primary_socket);
+		 MLX5_MDEV_DRIVER_NAME, priv->primary_socket);
 	ret = connect(socket_fd, (const struct sockaddr *)&sun, sizeof(sun));
 	if (ret < 0) {
 		WARN("cannot connect to primary");

@@ -22,10 +22,10 @@
 #include <rte_malloc.h>
 #include <rte_ip.h>
 
-#include "mlx5.h"
-#include "mlx5_defs.h"
-#include "mlx5_prm.h"
-#include "mlx5_glue.h"
+#include "mlx5_mdev.h"
+#include "mlx5_mdev_defs.h"
+#include "mlx5_mdev_prm.h"
+#include "mlx5_mdev_glue.h"
 
 /* Define minimal priority for control plane flows. */
 #define MLX5_CTRL_FLOW_PRIORITY 4

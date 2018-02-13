@@ -14,9 +14,9 @@
 #include <rte_mempool.h>
 #include <rte_malloc.h>
 
-#include "mlx5.h"
-#include "mlx5_rxtx.h"
-#include "mlx5_glue.h"
+#include "mlx5_mdev.h"
+#include "mlx5_mdev_rxtx.h"
+#include "mlx5_mdev_glue.h"
 
 struct mlx5_check_mempool_data {
 	int ret;

@@ -11,16 +11,6 @@
 #include <unistd.h>
 #include <sys/mman.h>
 
-/* Verbs header. */
-/* ISO C doesn't support unnamed structs/unions, disabling -pedantic. */
-#ifdef PEDANTIC
-#pragma GCC diagnostic ignored "-Wpedantic"
-#endif
-#include <infiniband/verbs.h>
-#ifdef PEDANTIC
-#pragma GCC diagnostic error "-Wpedantic"
-#endif
-
 #include <rte_mbuf.h>
 #include <rte_malloc.h>
 #include <rte_ethdev_driver.h>
@@ -376,21 +366,32 @@ mlx5_priv_txq_ibv_new(struct priv *priv, uint16_t idx)
 	struct mlx5_txq_ctrl *txq_ctrl =
 		container_of(txq_data, struct mlx5_txq_ctrl, txq);
 	struct mlx5_txq_ibv tmpl;
-	struct mlx5_txq_ibv *txq_ibv;
+	//struct mlx5_txq_ibv *txq_ibv;
 	union {
 		struct ibv_qp_init_attr_ex init;
 		struct ibv_cq_init_attr_ex cq;
 		struct ibv_qp_attr mod;
 		struct ibv_cq_ex cq_attr;
+		struct mdev_eq_attr meq_attr;
+		struct mdev_cq_attr mcq_attr;
+		struct mdev_tis_attr tis_attr;
+		struct mdev_sq_attr sq_attr;
 	} attr;
 	unsigned int cqe_n;
+	struct mdev_eq *meq = NULL;
+	struct mdev_cq *mcq = NULL;
+	struct mdev_tis *mtis = NULL;
+	struct mdev_sq *msq = NULL;
+#if 0
 	struct mlx5dv_qp qp = { .comp_mask = MLX5DV_QP_MASK_UAR_MMAP_OFFSET };
 	struct mlx5dv_cq cq_info;
 	struct mlx5dv_obj obj;
+#endif
 	const int desc = 1 << txq_data->elts_n;
 	eth_tx_burst_t tx_pkt_burst = priv_select_tx_function(priv, priv->dev);
+#if 0
 	int ret = 0;
-
+#endif
 	assert(txq_data);
 	priv->verbs_alloc_ctx.type = MLX5_VERBS_ALLOC_TYPE_TX_QUEUE;
 	priv->verbs_alloc_ctx.obj = txq_ctrl;
@@ -407,16 +408,44 @@ mlx5_priv_txq_ibv_new(struct priv *priv, uint16_t idx)
 		((desc / MLX5_TX_COMP_THRESH) - 1) : 1;
 	if (is_empw_burst_func(tx_pkt_burst))
 		cqe_n += MLX5_TX_COMP_THRESH_INLINE_DIV;
-	tmpl.cq = mlx5_glue->create_cq(priv->ctx, cqe_n, NULL, NULL, 0);
-	if (tmpl.cq == NULL) {
+
+	attr.meq_attr.ctx = priv->mpriv.dev_context;
+	attr.meq_attr.eqe = cqe_n;
+	meq = mlx5_mdev_create_eq(&priv->mpriv, &attr.meq_attr);
+	if (meq == NULL) {
+		ERROR("%p: EQ creation failure", (void *)txq_ctrl);
+		goto error;
+	}
+	attr.mcq_attr.cqe = cqe_n;
+	attr.mcq_attr.eqn = meq->eqn;
+	attr.mcq_attr.ctx = priv->mpriv.dev_context;
+	attr.mcq_attr.create_flags = 0;
+	ERROR("===== Calling mlx5_mdev_create_cq");
+	//tmpl.cq = mlx5_glue->create_cq(priv->ctx, cqe_n, NULL, NULL, 0);
+	mcq = mlx5_mdev_create_cq(&priv->mpriv, &attr.mcq_attr);
+	if (mcq == NULL) {
 		ERROR("%p: CQ creation failure", (void *)txq_ctrl);
 		goto error;
 	}
-	attr.init = (struct ibv_qp_init_attr_ex){
-		/* CQ to be associated with the send queue. */
-		.send_cq = tmpl.cq,
-		/* CQ to be associated with the receive queue. */
-		.recv_cq = tmpl.cq,
+	attr.tis_attr.ctx = priv->mpriv.dev_context;
+	attr.tis_attr.td = priv->mpriv.dev_context->td;
+	mtis = mlx5_mdev_create_tis(&priv->mpriv, &attr.tis_attr);
+	if (mtis == NULL) {
+		ERROR("%p: TIS creation failure", (void *)txq_ctrl);
+		goto error;
+	}
+	attr.sq_attr.ctx = priv->mpriv.dev_context;
+	attr.sq_attr.cqn = mcq->cqn;
+	attr.sq_attr.tisn = mtis->tisn;
+	attr.sq_attr.fre = 0; // TODO: get real value
+	attr.sq_attr.nelements = cqe_n; //mcq->ncqe;
+	attr.sq_attr.inline_mode = 0; // TODO: take from mlx5_ifc_nic_vport_context_bits
+	attr.sq_attr.rlkey = 0;
+	attr.sq_attr.wq.pd = priv->mpriv.dev_context->pd;
+	msq = mlx5_mdev_create_sq(&priv->mpriv, &attr.sq_attr);
+#if 0
+	// TODO where to put those vals ?
+
 		.cap = {
 			/* Max number of outstanding WRs. */
 			.max_send_wr =
@@ -438,10 +467,6 @@ mlx5_priv_txq_ibv_new(struct priv *priv, uint16_t idx)
 		 * Do *NOT* enable this, completions events are managed per
 		 * Tx burst.
 		 */
-		.sq_sig_all = 0,
-		.pd = priv->pd,
-		.comp_mask = IBV_QP_INIT_ATTR_PD,
-	};
 	if (txq_data->max_inline)
 		attr.init.cap.max_inline_data = txq_ctrl->max_inline_data;
 	if (txq_data->tso_en) {
@@ -453,12 +478,24 @@ mlx5_priv_txq_ibv_new(struct priv *priv, uint16_t idx)
 		ERROR("%p: QP creation failure", (void *)txq_ctrl);
 		goto error;
 	}
-	attr.mod = (struct ibv_qp_attr){
+#endif
+	if(msq == NULL) {
+		ERROR("%p: SQ creation failure", (void *)txq_ctrl);
+		goto error;
+	}
+
+	ERROR("UNDER CONSTRUCTION");
+	goto error;
+
+#if 0
+	attr.sq_attr = (struct mdev_sq_attr){
 		/* Move the QP to this state. */
-		.qp_state = IBV_QPS_INIT,
+		.sq_state = IBV_QPS_INIT,
 		/* Primary port number. */
 		.port_num = priv->port
 	};
+	ret = mlx5_mdev_modify_sq(msq, &attr.sq_attr, IBV_QP_STATE | IBV_QP_POR); //TODO: what to do here ?
+
 	ret = mlx5_glue->modify_qp(tmpl.qp, &attr.mod,
 				   (IBV_QP_STATE | IBV_QP_PORT));
 	if (ret) {
@@ -497,16 +534,37 @@ mlx5_priv_txq_ibv_new(struct priv *priv, uint16_t idx)
 		      "it should be set to %u", RTE_CACHE_LINE_SIZE);
 		goto error;
 	}
-	txq_data->cqe_n = log2above(cq_info.cqe_cnt);
+#endif
+	if (mcq->cqe_size != RTE_CACHE_LINE_SIZE) {
+		ERROR("Wrong MLX5_CQE_SIZE environment variable value: "
+		      "it should be set to %u", RTE_CACHE_LINE_SIZE);
+		goto error;
+	}
+#if 0
+	/* TODO: MOTIH use this as a hint
+	 * +               struct struct ibv_cq *mcq = to_mdcq(obj->cq.in);
++
++               obj->cq.out->buf = mcq->buf->addr;
++               // obj->cq.out->cq_uar = mcq->uar_page;  TODO: write virt address here
++               obj->cq.out->cqe_cnt = mcq->ncqe;
++               obj->cq.out->cqe_size = mcq->cqe_size;
++               obj->cq.out->cqn = mcq->cqn;
++               //obj->cq.out->dbrec = mcq->dbrec;   TODO: write virt address here
++       }
+	 *
+	 */
+
+	txq_data->cqe_n = log2above(mcq->cq_info.  ); //cqe_cnt
 	txq_data->qp_num_8s = tmpl.qp->qp_num << 8;
-	txq_data->wqes = qp.sq.buf;
-	txq_data->wqe_n = log2above(qp.sq.wqe_cnt);
-	txq_data->qp_db = &qp.dbrec[MLX5_SND_DBR];
-	txq_ctrl->bf_reg_orig = qp.bf.reg;
-	txq_data->cq_db = cq_info.dbrec;
+	txq_data->wqes = msq->wq.buf->addr; //buf;
+	txq_data->wqe_n = log2above(msq->wq.   .wqe_cnt);
+	txq_data->qp_db = &msq->wq.dbr_addr[MLX5_SND_DBR];
+	txq_ctrl->bf_reg_orig = wq.qp.bf.reg;
+	txq_data->cq_db = mcq->dbrec; // cq_info.dbrec;
+
 	txq_data->cqes =
 		(volatile struct mlx5_cqe (*)[])
-		(uintptr_t)cq_info.buf;
+		(uintptr_t)mcq->buf->addr;
 	txq_data->cq_ci = 0;
 #ifndef NDEBUG
 	txq_data->cq_pi = 0;
@@ -516,6 +574,8 @@ mlx5_priv_txq_ibv_new(struct priv *priv, uint16_t idx)
 	txq_ibv->qp = tmpl.qp;
 	txq_ibv->cq = tmpl.cq;
 	rte_atomic32_inc(&txq_ibv->refcnt);
+
+	// TODO: Is this ctx->uar ?
 	if (qp.comp_mask & MLX5DV_QP_MASK_UAR_MMAP_OFFSET) {
 		txq_ctrl->uar_mmap_offset = qp.uar_mmap_offset;
 	} else {
@@ -527,11 +587,14 @@ mlx5_priv_txq_ibv_new(struct priv *priv, uint16_t idx)
 	LIST_INSERT_HEAD(&priv->txqsibv, txq_ibv, next);
 	priv->verbs_alloc_ctx.type = MLX5_VERBS_ALLOC_TYPE_NONE;
 	return txq_ibv;
+#endif
 error:
-	if (tmpl.cq)
-		claim_zero(mlx5_glue->destroy_cq(tmpl.cq));
-	if (tmpl.qp)
-		claim_zero(mlx5_glue->destroy_qp(tmpl.qp));
+	if (msq)
+		claim_zero(mlx5_mdev_destroy_sq(msq));
+	if (mcq)
+		claim_zero(mlx5_mdev_destroy_cq(mcq));
+	if(mtis)
+		claim_zero(mlx5_mdev_destroy_tis(mtis));
 	priv->verbs_alloc_ctx.type = MLX5_VERBS_ALLOC_TYPE_NONE;
 	return NULL;
 }
@@ -767,6 +830,7 @@ mlx5_priv_txq_new(struct priv *priv, uint16_t idx, uint16_t desc,
 	tmpl->priv = priv;
 	tmpl->socket = socket;
 	tmpl->txq.elts_n = log2above(desc);
+	ERROR("============ tmpl->txq.elts_n %d (desc %d)", tmpl->txq.elts_n, desc);
 	txq_set_params(tmpl);
 	/* MRs will be registered in mp2mr[] later. */
 	DEBUG("priv->device_attr.max_qp_wr is %d",

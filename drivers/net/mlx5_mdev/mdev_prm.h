@@ -29,13 +29,14 @@
  *   (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  *   OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-#if 0
 
 #ifndef __PRM_H_
 #define __PRM_H_
 
+#include <linux/types.h> /* For the __be64 type */
+
 #ifndef u8
-#define u8          uint8_t
+#define u8		uint8_t
 #endif
 #ifndef __be16
 #define __be16          uint16_t
@@ -43,9 +44,7 @@
 #ifndef __be32
 #define __be32          uint32_t
 #endif
-#ifndef __be64
-#define __be64          uint64_t
-#endif
+
 
 struct mlx5_cmd_block {
 	u8              data[512];
@@ -118,6 +117,7 @@ enum {
 	MLX5_CMD_OP_ALLOC_TRANSPORT_DOMAIN        = 0x816,
 	MLX5_CMD_OP_DEALLOC_TRANSPORT_DOMAIN      = 0x817,
 	MLX5_CMD_OP_CREATE_SQ			  = 0x904,
+	MLX5_CMD_OP_MODIFY_SQ			  = 0x905,
 	MLX5_CMD_OP_CREATE_RQ                     = 0x908,
 	MLX5_CMD_OP_MODIFY_RQ                     = 0x909,
 	MLX5_CMD_OP_DESTROY_RQ                    = 0x90a,
@@ -1710,7 +1710,7 @@ struct mlx5_ifc_destroy_rqt_in_bits {
 
 	u8         reserved_at_60[0x20];
 };
-
+#if 0
 struct mlx5_cqe64 {
 	u8		outer_l3_tunneled;
 	u8		rsvd0;
@@ -1740,7 +1740,7 @@ struct mlx5_cqe64 {
 	u8		signature;
 	u8		op_own;
 };
-
+#endif
 /* helper macros */
 #define __mlx5_nullp(typ) ((struct mlx5_ifc_##typ##_bits *)0)
 #define __mlx5_bit_sz(typ, fld) sizeof(__mlx5_nullp(typ)->fld)

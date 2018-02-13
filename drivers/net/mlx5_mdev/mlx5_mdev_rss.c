@@ -9,16 +9,6 @@
 #include <string.h>
 #include <assert.h>
 
-/* Verbs header. */
-/* ISO C doesn't support unnamed structs/unions, disabling -pedantic. */
-#ifdef PEDANTIC
-#pragma GCC diagnostic ignored "-Wpedantic"
-#endif
-#include <infiniband/verbs.h>
-#ifdef PEDANTIC
-#pragma GCC diagnostic error "-Wpedantic"
-#endif
-
 #include <rte_malloc.h>
 #include <rte_ethdev_driver.h>
 
@@ -255,8 +245,8 @@ mlx5_dev_rss_reta_update(struct rte_eth_dev *dev,
 	ret = priv_dev_rss_reta_update(priv, reta_conf, reta_size);
 	priv_unlock(priv);
 	if (dev->data->dev_started) {
-		mlx5_dev_stop(dev);
-		mlx5_dev_start(dev);
+		mlx5_mdev_stop(dev);
+		mlx5_mdev_start(dev);
 	}
 	return -ret;
 }

@@ -7,18 +7,100 @@
 #include <stddef.h>
 #include <stdint.h>
 
-/* Verbs headers do not support -pedantic. */
-#ifdef PEDANTIC
-#pragma GCC diagnostic ignored "-Wpedantic"
-#endif
-#include <infiniband/mlx5dv.h>
-#include <infiniband/verbs.h>
-#ifdef PEDANTIC
-#pragma GCC diagnostic error "-Wpedantic"
-#endif
+#include <rte_common.h>
 
+#include "mlx5_mdev.h"
 #include "mlx5_mdev_autoconf.h"
 #include "mlx5_mdev_glue.h"
+#include "mlx5_mdev_priv.h"
+
+#ifdef RTE_LIBRTE_MLX5_DLOPEN_DEPS
+
+/**
+ * Initialization routine for run-time dependency on rdma-core.
+ */
+static int
+mlx5_glue_init(void)
+{
+	const char *path[] = {
+		/*
+		 * A basic security check is necessary before trusting
+		 * MLX5_GLUE_PATH, which may override RTE_EAL_PMD_PATH.
+		 */
+		(geteuid() == getuid() && getegid() == getgid() ?
+		 getenv("MLX5_GLUE_PATH") : NULL),
+		RTE_EAL_PMD_PATH,
+	};
+	unsigned int i = 0;
+	void *handle = NULL;
+	void **sym;
+	const char *dlmsg;
+
+	while (!handle && i != RTE_DIM(path)) {
+		const char *end;
+		size_t len;
+		int ret;
+
+		if (!path[i]) {
+			++i;
+			continue;
+		}
+		end = strpbrk(path[i], ":;");
+		if (!end)
+			end = path[i] + strlen(path[i]);
+		len = end - path[i];
+		ret = 0;
+		do {
+			char name[ret + 1];
+
+			ret = snprintf(name, sizeof(name), "%.*s%s" MLX5_GLUE,
+				       (int)len, path[i],
+				       (!len || *(end - 1) == '/') ? "" : "/");
+			if (ret == -1)
+				break;
+			if (sizeof(name) != (size_t)ret + 1)
+				continue;
+			DEBUG("looking for rdma-core glue as \"%s\"", name);
+			handle = dlopen(name, RTLD_LAZY);
+			break;
+		} while (1);
+		path[i] = end + 1;
+		if (!*end)
+			++i;
+	}
+	if (!handle) {
+		rte_errno = EINVAL;
+		dlmsg = dlerror();
+		if (dlmsg)
+			WARN("cannot load glue library: %s", dlmsg);
+		goto glue_error;
+	}
+	sym = dlsym(handle, "mlx5_glue");
+	if (!sym || !*sym) {
+		rte_errno = EINVAL;
+		dlmsg = dlerror();
+		if (dlmsg)
+			ERROR("cannot resolve glue symbol: %s", dlmsg);
+		goto glue_error;
+	}
+	mlx5_glue = *sym;
+	return 0;
+glue_error:
+	if (handle)
+		dlclose(handle);
+	WARN("cannot initialize PMD due to missing run-time"
+	     " dependency on rdma-core libraries (libibverbs,"
+	     " libmlx5)");
+	return -rte_errno;
+}
+
+#else /* RTE_LIBRTE_MLX5_DLOPEN_DEPS */
+int
+mlx5_glue_init(void)
+{
+	return 0;
+}
+#endif /* RTE_LIBRTE_MLX5_DLOPEN_DEPS */
 
 static int
 mlx5_glue_fork_init(void)
@@ -150,7 +232,7 @@ mlx5_glue_destroy_wq(struct ibv_wq *wq)
 static int
 mlx5_glue_modify_wq(struct ibv_wq *wq, struct ibv_wq_attr *wq_attr)
 {
-	return ibv_modify_wq(wq, wq_attr);
+	return ibv_modify_wq(wq, (struct ibv_wq_attr *)wq_attr);
 }
 
 static struct ibv_flow *
@@ -351,3 +433,5 @@ const struct mlx5_glue *mlx5_glue = &(const struct mlx5_glue){
 	.dv_set_context_attr = mlx5_glue_dv_set_context_attr,
 	.dv_init_obj = mlx5_glue_dv_init_obj,
 };
+
+

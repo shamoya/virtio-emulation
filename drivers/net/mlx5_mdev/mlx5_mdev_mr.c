@@ -3,14 +3,6 @@
  * Copyright 2016 Mellanox.
  */
 
-#ifdef PEDANTIC
-#pragma GCC diagnostic ignored "-Wpedantic"
-#endif
-#include <infiniband/verbs.h>
-#ifdef PEDANTIC
-#pragma GCC diagnostic error "-Wpedantic"
-#endif
-
 #include <rte_mempool.h>
 #include <rte_malloc.h>
 

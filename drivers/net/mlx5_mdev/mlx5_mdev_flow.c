@@ -6,16 +6,6 @@
 #include <sys/queue.h>
 #include <string.h>
 
-/* Verbs header. */
-/* ISO C doesn't support unnamed structs/unions, disabling -pedantic. */
-#ifdef PEDANTIC
-#pragma GCC diagnostic ignored "-Wpedantic"
-#endif
-#include <infiniband/verbs.h>
-#ifdef PEDANTIC
-#pragma GCC diagnostic error "-Wpedantic"
-#endif
-
 #include <rte_ethdev_driver.h>
 #include <rte_flow.h>
 #include <rte_flow_driver.h>
@@ -35,7 +25,7 @@
 #define MLX5_IPV6 6
 
 #ifndef HAVE_IBV_DEVICE_COUNTERS_SET_SUPPORT
-struct ibv_flow_spec_counter_action {
+struct mdev_flow_spec_counter_action {
 	int dummy;
 };
 #endif
@@ -444,7 +434,7 @@ struct mlx5_fdir {
 };
 
 /* Verbs specification header. */
-struct ibv_spec_header {
+struct mdev_spec_header {
 	enum ibv_flow_spec_type type;
 	uint16_t size;
 };
@@ -844,7 +834,7 @@ priv_flow_convert_items_validate(struct priv *priv,
 				sizeof(struct ibv_flow_spec_action_tag);
 	}
 	if (parser->count) {
-		unsigned int size = sizeof(struct ibv_flow_spec_counter_action);
+		unsigned int size = sizeof(struct mdev_flow_spec_counter_action);
 
 		for (i = 0; i != hash_rxq_init_n; ++i)
 			parser->queue[i].offset += size;
@@ -1599,9 +1589,9 @@ mlx5_flow_create_count(struct priv *priv __rte_unused,
 		       struct mlx5_flow_parse *parser __rte_unused)
 {
 #ifdef HAVE_IBV_DEVICE_COUNTERS_SET_SUPPORT
-	unsigned int size = sizeof(struct ibv_flow_spec_counter_action);
+	unsigned int size = sizeof(struct mdev_flow_spec_counter_action);
 	struct ibv_counter_set_init_attr init_attr = {0};
-	struct ibv_flow_spec_counter_action counter = {
+	struct mdev_flow_spec_counter_action counter = {
 		.type = IBV_FLOW_SPEC_ACTION_COUNT,
 		.size = size,
 		.counter_set_handle = 0,
@@ -2856,10 +2846,10 @@ priv_fdir_filter_delete(struct priv *priv,
 	}
 	TAILQ_FOREACH(flow, &priv->flows, next) {
 		struct ibv_flow_attr *attr;
-		struct ibv_spec_header *attr_h;
+		struct mdev_spec_header *attr_h;
 		void *spec;
 		struct ibv_flow_attr *flow_attr;
-		struct ibv_spec_header *flow_h;
+		struct mdev_spec_header *flow_h;
 		void *flow_spec;
 		unsigned int specs_n;
 

@@ -17,6 +17,7 @@
 #include <rte_ethdev.h>
 #include <rte_eth_ctrl.h>
 
+#include "mlx5_mdev_utils.h"
 #include "mdev_lib.h"
 
 /* todo: rte should be switched to local implementation */
@@ -29,18 +30,6 @@
 #define MDEV_CPU_TO_BE_32(x)		rte_cpu_to_be_32(x)
 #define MDEV_CPU_TO_BE_16(x)		rte_cpu_to_be_16(x)
 #define MDEV_ALLOC(size, align) rte_zmalloc("mdev", size, align)
-
-static inline unsigned int
-log2above(unsigned int v)
-{
-	unsigned int l;
-	unsigned int r;
-
-	for (l = 0, r = 0; (v >> 1); ++l, v >>= 1)
-		r |= (v & 1);
-	return l + r;
-}
-
 
 int mlx5_mdev_cmd_exec(struct mlx5_mdev_context *ctx, void *in, int ilen,
 			  void *out, int olen)
@@ -468,7 +457,7 @@ static int mlx5_mdev_alloc_uar(struct mlx5_mdev_context *ctx)
 	return status;
 }
 
-struct mlx5_mdev_context * mdev_open_device(void *owner,
+struct mlx5_mdev_context *mdev_open_device(void *owner,
 					void *iseg,
 					alloc_dma_memory_t *alloc_function)
 {
@@ -480,7 +469,7 @@ struct mlx5_mdev_context * mdev_open_device(void *owner,
 	ctx->owner = owner;
 	ctx->alloc_function = alloc_function;
 	ctx->iseg = iseg;
-	ctx->cache_line_size = 64; //todo: should be based on system
+	ctx->cache_line_size = RTE_CACHE_LINE_SIZE; //todo: should be based on system
 	ctx->page_size = 4096; //todo should be based on system
 
 	if (MDEV_READ_16_BE(&ctx->iseg->cmdif_rev) != 5)
@@ -489,24 +478,21 @@ struct mlx5_mdev_context * mdev_open_device(void *owner,
 	err = mlx5_mdev_cmd_init(ctx);
 	if (err)
 		return NULL;
-
 	mlx5_mdev_cmd_enable_reset_nic_interface(ctx);
 	while (MDEV_READ_32_BE(&ctx->iseg->initializing) >> 31)
 			;
 	err = mlx5_mdev_enable_hca(ctx);
 	if (err)
 		return NULL;
-
 	err = mlx5_mdev_set_issi(ctx);
 	if (err)
-		return NULL;
-
+		goto err_disable_hca;
+	err = mlx5_mdev_satisfy_startup_pages(ctx, 0);
 	if (err)
 		goto err_disable_hca;
-
-	err = mlx5_mdev_satisfy_startup_pages(ctx, 0);
 	err = mlx5_mdev_init_hca(ctx);
-
+	if (err)
+		goto err_disable_hca;
 	mlx5_mdev_get_hca_cap(ctx);
 	err = mlx5_mdev_check_hca_cap(ctx);
 	if (err)

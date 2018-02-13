@@ -8,16 +8,6 @@
 #include <assert.h>
 #include <stdint.h>
 
-/* Verbs headers do not support -pedantic. */
-#ifdef PEDANTIC
-#pragma GCC diagnostic ignored "-Wpedantic"
-#endif
-#include <infiniband/mlx5dv.h>
-#include <infiniband/verbs.h>
-#ifdef PEDANTIC
-#pragma GCC diagnostic error "-Wpedantic"
-#endif
-
 #include <rte_ethdev_driver.h>
 #include <rte_common.h>
 

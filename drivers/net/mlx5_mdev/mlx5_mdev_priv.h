@@ -5,6 +5,7 @@
 #ifndef MLX5_MDEV_PRIV_H_
 #define MLX5_MDEV_PRIV_H_
 
+#include "mlx5_mdev_glue.h"
 #include "mdev_lib.h"
 
 struct mlx5_mdev_db_page {
@@ -42,8 +43,6 @@ struct mdev_wq_attr {
 	uint8_t wq_stride;
 	uint8_t page_size;
 	uint8_t wq_size;
-
-
 };
 
 struct mdev_sq_attr {
@@ -62,14 +61,15 @@ struct mlx5_mdev_priv {
 	void	*base_addr;
 	struct mlx5_mdev_context *dev_context;
 	struct mlx5_mdev_db_page *db_page;
-	int32_t page_size;
-	int32_t cache_line_size;
-	rte_spinlock_t lock; /* Lock for control functions. */
+	//int32_t page_size;
+	//int32_t cache_line_size;
 };
 
 struct mdev_cq {
 	struct mlx5_mdev_context *ctx;
 	const struct rte_memzone *buf;
+	//struct ibv_cq ibvcq;
+	uint32_t out[MLX5_ST_SZ_DW(create_cq_out)];
 	uint64_t dbrec;
 	uint32_t cqe_size;
 	uint32_t uar_page;
@@ -108,12 +108,11 @@ struct mdev_wq {
 	uint8_t page_sz; /* The size of a WQ stride equals 2^log_wq_stride. */
 	uint8_t sz; /* The size of a WQ stride equals 2^log_wq_stride. */
 	const struct rte_memzone *buf;
-
 };
-
 
 struct mdev_sq {
 	struct mlx5_mdev_context *ctx;
+	uint32_t sqn;
 	uint32_t cqn;
 	uint32_t tisn;
 	struct mdev_wq wq;
@@ -125,6 +124,7 @@ int64_t mlx5_get_dbrec(struct mlx5_mdev_priv *priv);
 struct mdev_eq *
 mlx5_mdev_create_eq(struct mlx5_mdev_priv *priv,
 		    struct mdev_eq_attr *eq_attr);
+
 struct mdev_cq *
 mlx5_mdev_create_cq(struct mlx5_mdev_priv *priv,
 		    struct mdev_cq_attr *cq_attr);
@@ -137,15 +137,21 @@ struct mdev_sq *
 mlx5_mdev_create_sq(struct mlx5_mdev_priv *priv,
 		    struct mdev_sq_attr *sq_attr);
 
-static inline unsigned int
-log2above(unsigned int v)
-{
-	unsigned int l;
-	unsigned int r;
+int
+mlx5_mdev_modify_sq(struct mdev_sq *sq,
+	    	    struct mdev_sq_attr *sq_attr, int attr_mask);
 
-	for (l = 0, r = 0; (v >> 1); ++l, v >>= 1)
-		r |= (v & 1);
-	return l + r;
-}
+int
+mlx5_mdev_destroy_eq(struct mdev_eq *eq);
+
+int
+mlx5_mdev_destroy_cq(struct mdev_cq *cq);
+
+int
+mlx5_mdev_destroy_tis(struct mdev_tis *tis);
+
+int
+mlx5_mdev_destroy_sq(struct mdev_sq *sq);
+
 #endif
 

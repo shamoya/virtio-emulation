@@ -20,6 +20,7 @@
 
 #include "mdev_prm.h"
 #include "mlx5_mdev_priv.h"
+#include "mlx5_mdev_utils.h"
 
 static int
 mdev_priv_create_eq(struct mlx5_mdev_context *ctx __rte_unused, struct mdev_eq *eq)
@@ -52,13 +53,11 @@ mdev_priv_create_eq(struct mlx5_mdev_context *ctx __rte_unused, struct mdev_eq *
 #define cqe_sz_to_mlx_sz(size) \
 	(size)== 64 ? 0 : 1
 
-
 static int
-mdev_priv_create_cq(struct mlx5_mdev_context *ctx __rte_unused, struct mdev_cq *cq)
+mdev_priv_create_cq(struct mlx5_mdev_context *ctx, struct mdev_cq *cq)
 {
 	void *cqc;
 	uint32_t in[MLX5_ST_SZ_DW(create_cq_in)] = {0};
-	uint32_t out[MLX5_ST_SZ_DW(create_cq_out)];
 	int err, status, syndrome;
 
 	cqc = MLX5_ADDR_OF(create_cq_in, in, ctx);
@@ -72,15 +71,16 @@ mdev_priv_create_cq(struct mlx5_mdev_context *ctx __rte_unused, struct mdev_cq *
 	MLX5_SET(cqc, cqc, log_cq_size, log2(cq->ncqe)); // WAS: cq->buf->len
 	MLX5_SET(cqc, cqc, oi, 0);
 	printf("mdev_priv_create_cq uar %x, dbrec = %lx\n",cq->uar_page, cq->dbrec);
-	err = mlx5_mdev_cmd_exec(cq->ctx, in, sizeof(in), out, sizeof(out));
+	err = mlx5_mdev_cmd_exec(ctx, in, sizeof(in), cq->out, sizeof(cq->out));
 	if (err)
 		return (err);
-	cq->cqn = MLX5_GET(create_cq_out, out, cqn);
+	cq->ctx = ctx;
+	cq->cqn = MLX5_GET(create_cq_out, cq->out, cqn);
 	cq->cons_index = 0;
 	// cq->arm_sn     = 0;
-	status = MLX5_GET(create_cq_out, out, status);
-	syndrome = MLX5_GET(create_cq_out, out, syndrome);
-	printf("mdev_priv_create_cq status %x, syndrome = %x\n",status, syndrome);
+	status = MLX5_GET(create_cq_out, cq->out, status);
+	syndrome = MLX5_GET(create_cq_out, cq->out, syndrome);
+	printf("mdev_priv_create_cq status %x, syndrome = %x cqn %d\n",status, syndrome, cq->cqn);
 
 	return 0;
 }
@@ -112,7 +112,8 @@ mdev_priv_create_tis(struct mlx5_mdev_context *ctx __rte_unused, struct mdev_tis
 }
 
 static int
-mdev_priv_create_sq(struct mlx5_mdev_context *ctx __rte_unused, struct mdev_sq *sq)
+mdev_priv_create_sq(struct mlx5_mdev_context *ctx __rte_unused,
+		    struct mdev_sq *sq)
 {
 	void *sqc;
 	void *wqc;
@@ -142,7 +143,8 @@ mdev_priv_create_sq(struct mlx5_mdev_context *ctx __rte_unused, struct mdev_sq *
 	status = MLX5_GET(create_sq_out, out, status);
 	syndrome = MLX5_GET(create_sq_out, out, syndrome);
 	printf("mdev_priv_create_sq status %x, syndrome = %x\n",status, syndrome);
-
+	if(!status)
+		sq->sqn = MLX5_GET(create_sq_out, out, sqn);
 	return status;
 }
 
@@ -171,8 +173,9 @@ mlx5_mdev_create_eq(struct mlx5_mdev_priv *priv,
 	}
 	eq->ctx = ctx;
 	eq->neqe = neqe;
-	eq->buf = rte_eth_dma_zone_reserve(ctx->owner, "eq_buffer", 0, eq_size, eq_size,
-						priv->edev->data->numa_node);
+	eq->buf = rte_eth_dma_zone_reserve(ctx->owner, "eq_buffer",
+	                                   0, eq_size, ctx->page_size,
+	                                   priv->edev->data->numa_node);
 	if (!eq->buf)
 		goto err_spl;
 
@@ -208,7 +211,7 @@ mlx5_mdev_create_cq(struct mlx5_mdev_priv *priv,
 	if (!cq_attr->cqe) {
 		return NULL;
 	}
-	cq = rte_zmalloc("mdev_cq", sizeof(*cq), ctx->cache_line_size); // TODO: make it numa node aware ?
+	cq = rte_zmalloc("struct ibv_cq", sizeof(*cq), ctx->cache_line_size); // TODO: make it numa node aware ?
 	if(!cq)
 		return NULL;
 	ncqe = 1UL << log2above(cq_attr->cqe + 1);
@@ -234,7 +237,7 @@ err_spl:
 	//	mdev_dealloc_cq_buf(ctx, cq->buf);
 	//if (cq->dbrec)
 	//	mlx5_return_dbrec(priv, cq->dbrec);
-	//rte_free(cq);
+	rte_free(cq);
 	return NULL;
 }
 
@@ -262,10 +265,9 @@ mlx5_mdev_create_tis(struct mlx5_mdev_priv *priv,
 		goto err_tis;
 	return tis;
 err_tis:
-
+	rte_free(tis);
 	return NULL;
 }
-
 
 struct mdev_sq *
 mlx5_mdev_create_sq(struct mlx5_mdev_priv *priv,
@@ -275,25 +277,64 @@ mlx5_mdev_create_sq(struct mlx5_mdev_priv *priv,
 	int ret;
 	struct mdev_sq *sq;
 
-
 	sq = rte_zmalloc("sq", sizeof(*sq), ctx->cache_line_size);
 	if(!sq)
 		return NULL;
-
 	sq->ctx = ctx;
 	sq->wq.pd = sq_attr->wq.pd;
 	sq->cqn = sq_attr->cqn;
 	sq->tisn = sq_attr->tisn;
 	sq->wq.dbr_addr = mlx5_get_dbrec(priv);
 	sq->wq.uar_page = ctx->uar;
-	sq->wq.buf = rte_eth_dma_zone_reserve(ctx->owner, "sq_buffer", 0, sq_attr->nelements * 64, 4096,
-							priv->edev->data->numa_node);
+	sq->wq.buf = rte_eth_dma_zone_reserve(ctx->owner,
+	                                      "sq_buffer", 0,
+	                                      sq_attr->nelements * 64, 4096,
+	                                      priv->edev->data->numa_node);
 	ret = mdev_priv_create_sq(ctx, sq);
 	printf("create sq res == %d\n", ret);
 	if (ret)
 		goto err_sq;
 	return sq;
 err_sq:
-
+	rte_free(sq);
 	return NULL;
 }
+
+int
+mlx5_mdev_modify_sq(struct mdev_sq *sq __rte_unused,
+		    struct mdev_sq_attr *sq_attr __rte_unused,
+		    int attr_mask __rte_unused)
+{
+	ERROR("%s: Not implemented yet!!!", __func__);
+	return -1;
+}
+
+
+int
+mlx5_mdev_destroy_eq(struct mdev_eq *eq __rte_unused)
+{
+	ERROR("%s: Not implemented yet!!!", __func__);
+	return -1;
+}
+
+int
+mlx5_mdev_destroy_cq(struct mdev_cq *cq __rte_unused)
+{
+	ERROR("%s: Not implemented yet!!!", __func__);
+	return -1;
+}
+
+int
+mlx5_mdev_destroy_tis(struct mdev_tis *tis __rte_unused)
+{
+	ERROR("%s: Not implemented yet!!!", __func__);
+	return -1;
+}
+
+int
+mlx5_mdev_destroy_sq(struct mdev_sq *sq __rte_unused)
+{
+	ERROR("%s: Not implemented yet!!!", __func__);
+	return -1;
+}
+

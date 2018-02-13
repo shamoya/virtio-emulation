@@ -5,7 +5,10 @@
 #ifndef MDEV_LIB_H_
 #define MDEV_LIB_H_
 
+#include <stdint.h>
+
 #include <rte_memory.h>
+
 #include "mdev_prm.h"
 
 #define MDEV_DEBUG(f_,...) printf((f_), __VA_ARGS__)
@@ -61,6 +64,7 @@ struct mlx5_mdev_context {
 	uint32_t pd;
 	uint32_t td;
 	uint32_t uar;
+	pthread_mutex_t		mutex;
 };
 
 #define MLX5_CAP_GEN(mdev, mcap) \

@@ -67,7 +67,7 @@ priv_rxq_stop(struct priv *priv)
 		mlx5_priv_rxq_release(priv, i);
 }
 
-static int
+static int __rte_unused
 priv_rxq_start(struct priv *priv)
 {
 	unsigned int i;
@@ -105,13 +105,16 @@ error:
  *   0 on success, negative errno value on failure.
  */
 int
-mlx5_dev_start(struct rte_eth_dev *dev)
+mlx5_mdev_start(struct rte_eth_dev *dev)
 {
 	struct priv *priv = dev->data->dev_private;
+#if 0
 	struct mlx5_mr *mr = NULL;
+#endif
 	int err;
 
 	dev->data->dev_started = 1;
+#if 0
 	priv_lock(priv);
 	err = priv_flow_create_drop_queue(priv);
 	if (err) {
@@ -121,12 +124,15 @@ mlx5_dev_start(struct rte_eth_dev *dev)
 	}
 	DEBUG("%p: allocating and configuring hash RX queues", (void *)dev);
 	rte_mempool_walk(mlx5_mp2mr_iter, priv);
+#endif
+
 	err = priv_txq_start(priv);
 	if (err) {
 		ERROR("%p: TXQ allocation failed: %s",
 		      (void *)dev, strerror(err));
 		goto error;
 	}
+#if 0
 	err = priv_rxq_start(priv);
 	if (err) {
 		ERROR("%p: RXQ allocation failed: %s",
@@ -151,18 +157,23 @@ mlx5_dev_start(struct rte_eth_dev *dev)
 	}
 	priv_dev_interrupt_handler_install(priv, dev);
 	priv_unlock(priv);
+#endif
 	return 0;
 error:
 	/* Rollback. */
 	dev->data->dev_started = 0;
+#if 0
 	for (mr = LIST_FIRST(&priv->mr); mr; mr = LIST_FIRST(&priv->mr))
 		priv_mr_release(priv, mr);
 	priv_flow_stop(priv, &priv->flows);
 	priv_dev_traffic_disable(priv, dev);
+#endif
 	priv_txq_stop(priv);
+#if 0
 	priv_rxq_stop(priv);
 	priv_flow_delete_drop_queue(priv);
 	priv_unlock(priv);
+#endif
 	return err;
 }
 
@@ -175,29 +186,35 @@ error:
  *   Pointer to Ethernet device structure.
  */
 void
-mlx5_dev_stop(struct rte_eth_dev *dev)
+mlx5_mdev_stop(struct rte_eth_dev *dev)
 {
 	struct priv *priv = dev->data->dev_private;
+#if 0
 	struct mlx5_mr *mr;
 
 	priv_lock(priv);
+#endif
 	dev->data->dev_started = 0;
 	/* Prevent crashes when queues are still in use. */
 	dev->rx_pkt_burst = removed_rx_burst;
 	dev->tx_pkt_burst = removed_tx_burst;
 	rte_wmb();
 	usleep(1000 * priv->rxqs_n);
+#if 0
 	DEBUG("%p: cleaning up and destroying hash RX queues", (void *)dev);
 	priv_flow_stop(priv, &priv->flows);
 	priv_dev_traffic_disable(priv, dev);
 	priv_rx_intr_vec_disable(priv);
 	priv_dev_interrupt_handler_uninstall(priv, dev);
+#endif
 	priv_txq_stop(priv);
+#if 0
 	priv_rxq_stop(priv);
 	for (mr = LIST_FIRST(&priv->mr); mr; mr = LIST_FIRST(&priv->mr))
 		priv_mr_release(priv, mr);
 	priv_flow_delete_drop_queue(priv);
 	priv_unlock(priv);
+#endif
 }
 
 /**

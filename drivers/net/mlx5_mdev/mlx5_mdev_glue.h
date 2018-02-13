@@ -31,6 +31,8 @@ struct ibv_counter_set_init_attr;
 struct ibv_query_counter_set_attr;
 #endif
 
+int mlx5_glue_init(void);
+
 /* LIB_GLUE_VERSION must be updated every time this structure is modified. */
 struct mlx5_glue {
 	const char *version;

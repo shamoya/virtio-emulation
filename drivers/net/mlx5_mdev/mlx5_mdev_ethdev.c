@@ -535,19 +535,20 @@ dev_configure(struct rte_eth_dev *dev)
 		ERROR("Some Tx offloads are not supported "
 		      "requested 0x%" PRIx64 " supported 0x%" PRIx64,
 		      tx_offloads, supp_tx_offloads);
-		return ENOTSUP;
+		// return ENOTSUP;   TODO: Return me
 	}
 	if ((rx_offloads & supp_rx_offloads) != rx_offloads) {
 		ERROR("Some Rx offloads are not supported "
 		      "requested 0x%" PRIx64 " supported 0x%" PRIx64,
 		      rx_offloads, supp_rx_offloads);
-		return ENOTSUP;
+		// return ENOTSUP; TODO: Return me
 	}
 	if (use_app_rss_key &&
 	    (dev->data->dev_conf.rx_adv_conf.rss_conf.rss_key_len !=
 	     rss_hash_default_key_len)) {
 		/* MLX5 RSS only support 40bytes key. */
-		return EINVAL;
+		ERROR("===== Invalid RSS key");	// TODO: Remove me
+		// return EINVAL; TODO: Return me
 	}
 	priv->rss_conf.rss_key =
 		rte_realloc(priv->rss_conf.rss_key,
@@ -579,6 +580,7 @@ dev_configure(struct rte_eth_dev *dev)
 	INFO("%p: RX queues number update: %u -> %u",
 	     (void *)dev, priv->rxqs_n, rxqs_n);
 	priv->rxqs_n = rxqs_n;
+	ERROR("=========== %s: %d", __FUNCTION__, __LINE__);
 	/* If the requested number of RX queues is not a power of two, use the
 	 * maximum indirection table size for better balancing.
 	 * The result is always rounded to the next power of two. */
@@ -587,6 +589,7 @@ dev_configure(struct rte_eth_dev *dev)
 				     rxqs_n));
 	if (priv_rss_reta_index_resize(priv, reta_idx_n))
 		return ENOMEM;
+	ERROR("=========== %s: %d", __FUNCTION__, __LINE__);
 	/* When the number of RX queues is not a power of two, the remaining
 	 * table entries are padded with reused WQs and hashes are not spread
 	 * uniformly. */
@@ -1130,7 +1133,7 @@ out:
 }
 
 /**
- * Get PCI information from struct ibv_device.
+ * Get PCI information from struct struct ibv_device.
  *
  * @param device
  *   Pointer to Ethernet device structure.
@@ -1141,8 +1144,8 @@ out:
  *   0 on success, -1 on failure and errno is set.
  */
 int
-mlx5_ibv_device_to_pci_addr(const struct ibv_device *device,
-			    struct rte_pci_addr *pci_addr)
+mlx5_mdev_device_to_pci_addr(const struct ibv_device *device,
+			     struct rte_pci_addr *pci_addr)
 {
 	FILE *file;
 	char line[32];

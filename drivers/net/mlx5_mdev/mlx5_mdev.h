@@ -13,16 +13,6 @@
 #include <netinet/in.h>
 #include <sys/queue.h>
 
-/* Verbs header. */
-/* ISO C doesn't support unnamed structs/unions, disabling -pedantic. */
-#ifdef PEDANTIC
-#pragma GCC diagnostic ignored "-Wpedantic"
-#endif
-#include <infiniband/verbs.h>
-#ifdef PEDANTIC
-#pragma GCC diagnostic error "-Wpedantic"
-#endif
-
 #include <rte_pci.h>
 #include <rte_ether.h>
 #include <rte_ethdev_driver.h>
@@ -35,6 +25,8 @@
 #include "mlx5_mdev_rxtx.h"
 #include "mlx5_mdev_autoconf.h"
 #include "mlx5_mdev_defs.h"
+#include "mlx5_mdev_glue.h"
+#include "mlx5_mdev_priv.h"
 
 enum {
 	PCI_VENDOR_ID_MELLANOX = 0x15b3,
@@ -115,10 +107,12 @@ struct mlx5_verbs_alloc_ctx {
 
 struct priv {
 	struct rte_eth_dev *dev; /* Ethernet device of master process. */
-	struct ibv_context *ctx; /* Verbs context. */
+	struct ibv_context *ctx; /* mdev context. */
+	//struct ibv_context mctx; /* mdev context. */
 	struct ibv_device_attr_ex device_attr; /* Device properties. */
 	struct ibv_pd *pd; /* Protection Domain. */
 	char ibdev_path[IBV_SYSFS_PATH_MAX]; /* IB device path for secondary */
+	struct mlx5_mdev_priv mpriv;
 	struct ether_addr mac[MLX5_MAX_MAC_ADDRESSES]; /* MAC addresses. */
 	uint16_t vlan_filter[MLX5_MAX_VLAN_IDS]; /* VLAN filters table. */
 	unsigned int vlan_filter_n; /* Number of configured VLAN filters. */
@@ -223,7 +217,7 @@ int mlx5_link_update(struct rte_eth_dev *, int);
 int mlx5_dev_set_mtu(struct rte_eth_dev *, uint16_t);
 int mlx5_dev_get_flow_ctrl(struct rte_eth_dev *, struct rte_eth_fc_conf *);
 int mlx5_dev_set_flow_ctrl(struct rte_eth_dev *, struct rte_eth_fc_conf *);
-int mlx5_ibv_device_to_pci_addr(const struct ibv_device *,
+int mlx5_mdev_device_to_pci_addr(const struct ibv_device *,
 				struct rte_pci_addr *);
 void mlx5_dev_link_status_handler(void *);
 void mlx5_dev_interrupt_handler(void *);
@@ -279,8 +273,8 @@ void mlx5_vlan_strip_queue_set(struct rte_eth_dev *, uint16_t, int);
 
 /* mlx5_trigger.c */
 
-int mlx5_dev_start(struct rte_eth_dev *);
-void mlx5_dev_stop(struct rte_eth_dev *);
+int mlx5_mdev_start(struct rte_eth_dev *);
+void mlx5_mdev_stop(struct rte_eth_dev *);
 int priv_dev_traffic_enable(struct priv *, struct rte_eth_dev *);
 int priv_dev_traffic_disable(struct priv *, struct rte_eth_dev *);
 int priv_dev_traffic_restart(struct priv *, struct rte_eth_dev *);

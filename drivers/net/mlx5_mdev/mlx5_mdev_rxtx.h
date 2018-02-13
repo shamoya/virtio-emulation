@@ -10,17 +10,6 @@
 #include <stdint.h>
 #include <sys/queue.h>
 
-/* Verbs header. */
-/* ISO C doesn't support unnamed structs/unions, disabling -pedantic. */
-#ifdef PEDANTIC
-#pragma GCC diagnostic ignored "-Wpedantic"
-#endif
-#include <infiniband/verbs.h>
-#include <infiniband/mlx5dv.h>
-#ifdef PEDANTIC
-#pragma GCC diagnostic error "-Wpedantic"
-#endif
-
 #include <rte_mbuf.h>
 #include <rte_mempool.h>
 #include <rte_common.h>
@@ -31,6 +20,7 @@
 #include "mlx5_mdev.h"
 #include "mlx5_mdev_autoconf.h"
 #include "mlx5_mdev_defs.h"
+#include "mlx5_mdev_glue.h"
 #include "mlx5_mdev_prm.h"
 
 struct mlx5_rxq_stats {

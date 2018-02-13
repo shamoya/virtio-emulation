@@ -155,6 +155,11 @@ else
 _LDLIBS-$(CONFIG_RTE_LIBRTE_MLX5_PMD)       += -lrte_pmd_mlx5 -libverbs -lmlx5
 endif
 _LDLIBS-$(CONFIG_RTE_LIBRTE_MLX5_MDEV_PMD)  += -lrte_pmd_mlx5_mdev
+ifeq ($(CONFIG_RTE_LIBRTE_MLX5_MDEV_DLOPEN_DEPS),y)
+_LDLIBS-$(CONFIG_RTE_LIBRTE_MLX5_MDEV_PMD)  += -lrte_pmd_mlx5_mdev -ldl
+else
+_LDLIBS-$(CONFIG_RTE_LIBRTE_MLX5_MDEV_PMD)  += -lrte_pmd_mlx5_mdev -libverbs -lmlx5
+endif
 _LDLIBS-$(CONFIG_RTE_LIBRTE_MRVL_PMD)       += -lrte_pmd_mrvl -L$(LIBMUSDK_PATH)/lib -lmusdk
 _LDLIBS-$(CONFIG_RTE_LIBRTE_NFP_PMD)        += -lrte_pmd_nfp
 _LDLIBS-$(CONFIG_RTE_LIBRTE_PMD_NULL)       += -lrte_pmd_null

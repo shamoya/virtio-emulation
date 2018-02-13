@@ -93,7 +93,20 @@ static int mlx5_mdev_init(struct rte_eth_dev *edev)
 	priv->dev_context = mdev_open_device(priv->edev,
 						priv->base_addr,
 						alloc_pinned);
+	struct mdev_cq_attr cq_attr = {0};
+	struct mdev_eq_attr eq_attr = {0};
 
+	cq_attr.cqe = 64;
+	cq_attr.ctx = priv->dev_context;
+	eq_attr.ctx = priv->dev_context;
+	eq_attr.eqe = 64;
+	struct mdev_eq * eq =
+		mlx5_mdev_create_eq(priv, &eq_attr);
+	cq_attr.eqn = eq->eqn;
+	struct mdev_cq * cq =
+			mlx5_mdev_create_cq(priv, &cq_attr);
+
+	printf("ooooOri in mlx5_mdev_init after cq = %x, %x\n", eq->eqn, cq->cqn);
 
 	printf("ooooOri in mlx5_mdev_init end\n");
 	return 0;

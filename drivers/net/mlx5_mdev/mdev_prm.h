@@ -30,6 +30,9 @@
  *   OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#ifndef __PRM_H_
+#define __PRM_H_
+
 #ifndef u8
 #define u8          uint8_t
 #endif
@@ -1776,3 +1779,4 @@ __mlx5_mask(typ, fld))
 			}						  \
 		tmp;							  \
 		})
+#endif

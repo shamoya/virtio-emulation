@@ -5,6 +5,13 @@
 #ifndef MLX5_MDEV_PRIV_H_
 #define MLX5_MDEV_PRIV_H_
 
+struct mlx5_mdev_db_page {
+	const struct rte_memzone *rte_mz;
+	int num_db;
+	int use_cnt;
+	uint32_t free_records[];
+};
+
 struct mlx5_mdev_priv {
 	struct rte_eth_dev *edev;
 	void	*base_addr;
@@ -14,6 +21,10 @@ struct mlx5_mdev_priv {
 	int32_t cache_line_size;
 	rte_spinlock_t lock; /* Lock for control functions. */
 };
+
+
+int64_t mlx5_get_dbrec(struct mlx5_mdev_priv *priv);
+
 
 #endif
 

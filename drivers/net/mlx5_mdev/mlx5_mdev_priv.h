@@ -21,6 +21,11 @@ struct mdev_cq_attr {
 	uint32_t eqn;
 };
 
+struct mdev_tis_attr {
+	struct mlx5_mdev_context *ctx;
+	uint32_t td;
+};
+
 struct mdev_eq_attr {
 	struct mlx5_mdev_context *ctx;
 	uint32_t eqe; /* Minimum number of entries required for CQ */
@@ -59,6 +64,13 @@ struct mdev_eq {
 	uint32_t neqe;
 };
 
+struct mdev_tis {
+	struct mlx5_mdev_context *ctx;
+	uint32_t td;
+	uint8_t priority;
+	uint32_t tisn;
+};
+
 int64_t mlx5_get_dbrec(struct mlx5_mdev_priv *priv);
 
 
@@ -68,6 +80,10 @@ mlx5_mdev_create_eq(struct mlx5_mdev_priv *priv,
 struct mdev_cq *
 mlx5_mdev_create_cq(struct mlx5_mdev_priv *priv,
 		    struct mdev_cq_attr *cq_attr);
+
+struct mdev_tis *
+mlx5_mdev_create_tis(struct mlx5_mdev_priv *priv,
+		    struct mdev_tis_attr *tis_attr);
 
 static inline unsigned int
 log2above(unsigned int v)

@@ -86,6 +86,32 @@ mdev_priv_create_cq(struct mlx5_mdev_context *ctx __rte_unused, struct mdev_cq *
 }
 
 
+static int
+mdev_priv_create_tis(struct mlx5_mdev_context *ctx __rte_unused, struct mdev_tis *tis)
+{
+	void *tisc;
+	uint32_t in[MLX5_ST_SZ_DW(create_tis_in)] = {0};
+	uint32_t out[MLX5_ST_SZ_DW(create_tis_out)];
+	int err, status, syndrome;
+
+	tisc = MLX5_ADDR_OF(create_tis_in, in, ctx);
+	MLX5_SET(create_tis_in, in, opcode, MLX5_CMD_OP_CREATE_TIS);
+	MLX5_SET(tisc, tisc, prio, (tis->priority)<<1);
+	MLX5_SET(tisc, tisc, transport_domain, tis->td);
+	err = mlx5_mdev_cmd_exec(tis->ctx, in, sizeof(in), out, sizeof(out));
+	if (err)
+		return (err);
+
+	status = MLX5_GET(create_cq_out, out, status);
+	syndrome = MLX5_GET(create_cq_out, out, syndrome);
+	if(!status)
+		tis->tisn = MLX5_GET(create_tis_out, out, tisn);
+	printf("mdev_priv_create_tis status %x, syndrome = %x\n",status, syndrome);
+
+	return status;
+}
+
+
 struct mdev_eq *
 mlx5_mdev_create_eq(struct mlx5_mdev_priv *priv,
 		    struct mdev_eq_attr *eq_attr)
@@ -178,3 +204,30 @@ err_spl:
 	return NULL;
 }
 
+struct mdev_tis *
+mlx5_mdev_create_tis(struct mlx5_mdev_priv *priv,
+		    struct mdev_tis_attr *tis_attr)
+{
+	struct mlx5_mdev_context *ctx = priv->dev_context;
+	int ret;
+	struct mdev_tis *tis;
+
+	if (!tis_attr->td) {
+		return NULL;
+	}
+	tis = rte_zmalloc("tis", sizeof(*tis), ctx->cache_line_size);
+	if(!tis)
+		return NULL;
+
+	tis->ctx = ctx;
+	tis->td = tis_attr->td;
+
+	ret = mdev_priv_create_tis(ctx, tis);
+	printf("create tis res == %d\n", ret);
+	if (ret)
+		goto err_tis;
+	return tis;
+err_tis:
+
+	return NULL;
+}

@@ -116,6 +116,7 @@ enum {
 	MLX5_CMD_OP_DEALLOC_UAR                   = 0x803,
 	MLX5_CMD_OP_ALLOC_TRANSPORT_DOMAIN        = 0x816,
 	MLX5_CMD_OP_DEALLOC_TRANSPORT_DOMAIN      = 0x817,
+	MLX5_CMD_OP_CREATE_SQ			  = 0x904,
 	MLX5_CMD_OP_CREATE_RQ                     = 0x908,
 	MLX5_CMD_OP_MODIFY_RQ                     = 0x909,
 	MLX5_CMD_OP_DESTROY_RQ                    = 0x90a,
@@ -1478,6 +1479,38 @@ struct mlx5_ifc_rqc_bits {
 	struct mlx5_ifc_wq_bits wq;
 };
 
+struct mlx5_ifc_sqc_bits {
+	u8         rlky[0x1];
+	u8         cd_master[0x1];
+	u8         fre[0x1];
+	u8         flush_in_error_en[0x1];
+	u8         allow_multi_pkt_send_wqe[0x1];
+	u8	   min_wqe_inline_mode[0x3];
+	u8         state[0x4];
+	u8         reg_umr[0x1];
+	u8         allow_swp[0x1];
+	u8         reserved_at_e[0x12];
+
+	u8         reserved_at_20[0x8];
+	u8         user_index[0x18];
+
+	u8         reserved_at_40[0x8];
+	u8         cqn[0x18];
+
+	u8         reserved_at_60[0x90];
+
+	u8         packet_pacing_rate_limit_index[0x10];
+	u8         tis_lst_sz[0x10];
+	u8         reserved_at_110[0x10];
+
+	u8         reserved_at_120[0x40];
+
+	u8         reserved_at_160[0x8];
+	u8         tis_num_0[0x18];
+
+	struct mlx5_ifc_wq_bits wq;
+};
+
 struct mlx5_ifc_create_rq_out_bits {
 	u8         status[0x8];
 	u8         reserved_at_8[0x18];
@@ -1511,6 +1544,29 @@ struct mlx5_ifc_modify_rq_out_bits {
 	u8         reserved_at_40[0x40];
 };
 
+struct mlx5_ifc_create_sq_out_bits {
+	u8         status[0x8];
+	u8         reserved_at_8[0x18];
+
+	u8         syndrome[0x20];
+
+	u8         reserved_at_40[0x8];
+	u8         sqn[0x18];
+
+	u8         reserved_at_60[0x20];
+};
+
+struct mlx5_ifc_create_sq_in_bits {
+	u8         opcode[0x10];
+	u8         reserved_at_10[0x10];
+
+	u8         reserved_at_20[0x10];
+	u8         op_mod[0x10];
+
+	u8         reserved_at_40[0xc0];
+
+	struct mlx5_ifc_sqc_bits ctx;
+};
 enum {
 	MLX5_MODIFY_RQ_IN_MODIFY_BITMASK_VSD = 1ULL << 1,
 	MLX5_MODIFY_RQ_IN_MODIFY_BITMASK_SCATTER_FCS = 1ULL << 2,

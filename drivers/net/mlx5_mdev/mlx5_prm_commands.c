@@ -111,6 +111,40 @@ mdev_priv_create_tis(struct mlx5_mdev_context *ctx __rte_unused, struct mdev_tis
 	return status;
 }
 
+static int
+mdev_priv_create_sq(struct mlx5_mdev_context *ctx __rte_unused, struct mdev_sq *sq)
+{
+	void *sqc;
+	void *wqc;
+	uint32_t in[MLX5_ST_SZ_DW(create_sq_in)] = {0};
+	uint32_t out[MLX5_ST_SZ_DW(create_sq_out)] = {0};
+	int err, status, syndrome;
+
+	MLX5_SET(create_cq_in, in, opcode, MLX5_CMD_OP_CREATE_SQ);
+
+	sqc = MLX5_ADDR_OF(create_sq_in, in, ctx);
+	MLX5_SET(sqc, sqc, cqn, sq->cqn);
+	MLX5_SET(sqc, sqc, tis_lst_sz, 1);
+	MLX5_SET(sqc, sqc, tis_num_0, sq->tisn);
+
+	wqc = MLX5_ADDR_OF(sqc, sqc, wq);
+	MLX5_SET(wq, wqc, wq_type, 0x1);
+	MLX5_SET(wq, wqc, pd, sq->wq.pd);
+	MLX5_SET64(wq, wqc, dbr_addr, sq->wq.dbr_addr);
+	MLX5_SET(wq, wqc, log_wq_stride, 6);
+	MLX5_SET(wq, wqc, log_wq_pg_sz, log2(sq->wq.buf->len /4096));
+	MLX5_SET(wq, wqc, log_wq_sz, log2(sq->wq.buf->len>>6));
+	MLX5_ARRAY_SET64(wq, wqc, pas, 0, sq->wq.buf->iova);
+
+	err = mlx5_mdev_cmd_exec(sq->ctx, in, sizeof(in), out, sizeof(out));
+	if (err)
+		return (err);
+	status = MLX5_GET(create_sq_out, out, status);
+	syndrome = MLX5_GET(create_sq_out, out, syndrome);
+	printf("mdev_priv_create_sq status %x, syndrome = %x\n",status, syndrome);
+
+	return status;
+}
 
 struct mdev_eq *
 mlx5_mdev_create_eq(struct mlx5_mdev_priv *priv,
@@ -228,6 +262,38 @@ mlx5_mdev_create_tis(struct mlx5_mdev_priv *priv,
 		goto err_tis;
 	return tis;
 err_tis:
+
+	return NULL;
+}
+
+
+struct mdev_sq *
+mlx5_mdev_create_sq(struct mlx5_mdev_priv *priv,
+		    struct mdev_sq_attr *sq_attr)
+{
+	struct mlx5_mdev_context *ctx = priv->dev_context;
+	int ret;
+	struct mdev_sq *sq;
+
+
+	sq = rte_zmalloc("sq", sizeof(*sq), ctx->cache_line_size);
+	if(!sq)
+		return NULL;
+
+	sq->ctx = ctx;
+	sq->wq.pd = sq_attr->wq.pd;
+	sq->cqn = sq_attr->cqn;
+	sq->tisn = sq_attr->tisn;
+	sq->wq.dbr_addr = mlx5_get_dbrec(priv);
+	sq->wq.uar_page = ctx->uar;
+	sq->wq.buf = rte_eth_dma_zone_reserve(ctx->owner, "sq_buffer", 0, sq_attr->nelements * 64, 4096,
+							priv->edev->data->numa_node);
+	ret = mdev_priv_create_sq(ctx, sq);
+	printf("create sq res == %d\n", ret);
+	if (ret)
+		goto err_sq;
+	return sq;
+err_sq:
 
 	return NULL;
 }

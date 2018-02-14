@@ -31,6 +31,32 @@ struct mdev_eq_attr {
 	uint32_t eqe; /* Minimum number of entries required for CQ */
 };
 
+struct mdev_wq_attr {
+	uint8_t wq_type;
+	uint8_t page_offset;
+	uint32_t pd;
+	uint32_t uar_page;
+	uint64_t dbr_addr;
+	uint32_t hw_counter;
+	uint32_t sw_counter;
+	uint8_t wq_stride;
+	uint8_t page_size;
+	uint8_t wq_size;
+
+
+};
+
+struct mdev_sq_attr {
+	struct mlx5_mdev_context *ctx;
+	uint32_t nelements;
+	uint8_t rlkey;
+	uint8_t fre;
+	uint8_t inline_mode;
+	uint32_t cqn;
+	uint32_t tisn;
+	struct mdev_wq_attr wq;
+};
+
 struct mlx5_mdev_priv {
 	struct rte_eth_dev *edev;
 	void	*base_addr;
@@ -71,6 +97,28 @@ struct mdev_tis {
 	uint32_t tisn;
 };
 
+struct mdev_wq {
+	uint8_t wq_type;
+	uint32_t pd;
+	uint32_t uar_page;
+	uint32_t dbr_addr;
+	uint32_t hw_counter;
+	uint32_t sw_counter;
+	uint8_t stride_sz; /* The size of a WQ stride equals 2^log_wq_stride. */
+	uint8_t page_sz; /* The size of a WQ stride equals 2^log_wq_stride. */
+	uint8_t sz; /* The size of a WQ stride equals 2^log_wq_stride. */
+	const struct rte_memzone *buf;
+
+};
+
+
+struct mdev_sq {
+	struct mlx5_mdev_context *ctx;
+	uint32_t cqn;
+	uint32_t tisn;
+	struct mdev_wq wq;
+};
+
 int64_t mlx5_get_dbrec(struct mlx5_mdev_priv *priv);
 
 
@@ -84,6 +132,10 @@ mlx5_mdev_create_cq(struct mlx5_mdev_priv *priv,
 struct mdev_tis *
 mlx5_mdev_create_tis(struct mlx5_mdev_priv *priv,
 		    struct mdev_tis_attr *tis_attr);
+
+struct mdev_sq *
+mlx5_mdev_create_sq(struct mlx5_mdev_priv *priv,
+		    struct mdev_sq_attr *sq_attr);
 
 static inline unsigned int
 log2above(unsigned int v)

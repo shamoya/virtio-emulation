@@ -110,7 +110,15 @@ static int mlx5_mdev_init(struct rte_eth_dev *edev)
 	tis_attr.td = priv->dev_context->td;
 	struct mdev_tis *tis = mlx5_mdev_create_tis(priv, &tis_attr);
 
-	printf("ooooOri in mlx5_mdev_init after cq = %x, %x, %x\n", eq->eqn, cq->cqn, tis->tisn);
+
+	struct mdev_sq_attr sq_attr = {0};
+	sq_attr.cqn = cq->cqn;
+	sq_attr.ctx = priv->dev_context;
+	sq_attr.nelements = 64;
+	sq_attr.tisn = tis->tisn;
+	sq_attr.wq.pd = priv->dev_context->pd;
+	struct mdev_sq *sq = mlx5_mdev_create_sq(priv,&sq_attr);
+	printf("ooooOri in mlx5_mdev_init after cq = %x, %x, %x, %x\n", eq->eqn, cq->cqn, tis->tisn, sq->wq.dbr_addr);
 
 	printf("ooooOri in mlx5_mdev_init end\n");
 	return 0;

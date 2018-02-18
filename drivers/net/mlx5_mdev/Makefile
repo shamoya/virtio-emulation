@@ -47,6 +47,7 @@ $(foreach obj, $(BASE_RDMA_OBJS), $(eval CFLAGS_rdma_core/$(obj) += $(RDMA_FLAGS
 $(foreach obj, $(CCAN_RDMA_OBJS), $(eval CFLAGS_rdma_core/ccan/$(obj) += $(RDMA_FLAGS)))
 CFLAGS_cmd_ioctl.o += $(BASE_RDMA_FLAGS)
 CFLAGS_devx.o += $(BASE_RDMA_FLAGS)
+CFLAGS_devx_uar.o += $(BASE_RDMA_FLAGS)
 
 # Sources.
 SRCS-$(CONFIG_RTE_LIBRTE_MLX5_MDEV_PMD) += mlx5_mdev.c
@@ -75,6 +76,7 @@ SRCS-$(CONFIG_RTE_LIBRTE_MLX5_MDEV_PMD) += mlx5_mdev_dbrec.c
 SRCS-$(CONFIG_RTE_LIBRTE_MLX5_MDEV_PMD) += mlx5_prm_commands.c
 SRCS-$(CONFIG_RTE_LIBRTE_MLX5_MDEV_PMD) += cmd_ioctl.c
 SRCS-$(CONFIG_RTE_LIBRTE_MLX5_MDEV_PMD) += devx.c
+SRCS-$(CONFIG_RTE_LIBRTE_MLX5_MDEV_PMD) += devx_uar.c
 SRCS-$(CONFIG_RTE_LIBRTE_MLX5_MDEV_PMD) += rdma_core/device.c
 SRCS-$(CONFIG_RTE_LIBRTE_MLX5_MDEV_PMD) += rdma_core/cmd.c
 SRCS-$(CONFIG_RTE_LIBRTE_MLX5_MDEV_PMD) += rdma_core/init.c

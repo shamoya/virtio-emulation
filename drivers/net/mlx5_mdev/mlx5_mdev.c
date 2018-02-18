@@ -278,7 +278,7 @@ const struct eth_dev_ops mlx5_mdev_dev_ops = { // TODO...
 
 /*  */
 
-const struct eth_dev_ops mlx5_dev_ops = {
+const struct eth_dev_ops mlx5_mdev_ops = {
 	.dev_configure = mlx5_dev_configure,
 	.dev_start = mlx5_mdev_start,
 	.dev_stop = mlx5_mdev_stop,
@@ -1041,7 +1041,7 @@ mlx5_mdev_init(struct rte_eth_dev *edev)
 		eth_dev->rx_pkt_burst = removed_rx_burst;
 		eth_dev->tx_pkt_burst = removed_tx_burst;
 		//priv->dev = eth_dev;
-		eth_dev->dev_ops = &mlx5_mdev_dev_ops; // TODO: Return: &mlx5_dev_ops;
+		eth_dev->dev_ops = &mlx5_mdev_dev_ops; // TODO: Return: &mlx5_mdev_ops;
 		/* Register MAC address. */
 		claim_zero(mlx5_mac_addr_add(eth_dev, &mac, 0, 0));
 		TAILQ_INIT(&priv->flows);

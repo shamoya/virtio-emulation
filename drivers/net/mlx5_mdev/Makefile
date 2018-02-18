@@ -38,10 +38,15 @@ LIB_GLUE_BASE = librte_pmd_mlx5_mdev_glue.so
 LIB_GLUE_VERSION = 18.02.0
 
 # Additional flags for RDMA code being added.
-RDMA_FLAGS = -I$(SRCDIR) -I$(SRCDIR)/rdma_core -Wno-unused-parameter \
-	-Wno-pedantic
-CFLAGS_cmd_ioctl.o += $(RDMA_FLAGS)
-CFLAGS_devx.o += $(RDMA_FLAGS)
+BASE_RDMA_FLAGS = -I$(SRCDIR) -I$(SRCDIR)/rdma_core -Wno-unused-parameter \
+		  -Wno-pedantic
+RDMA_FLAGS = $(BASE_RDMA_FLAGS) -Wno-pointer-arith -Wno-sign-compare
+BASE_RDMA_OBJS = $(sort $(patsubst %.c,%.o,$(notdir $(wildcard $(SRCDIR)/rdma_core/*.c))))
+CCAN_RDMA_OBJS = $(sort $(patsubst %.c,%.o,$(notdir $(wildcard $(SRCDIR)/rdma_core/ccan/*.c))))
+$(foreach obj, $(BASE_RDMA_OBJS), $(eval CFLAGS_rdma_core/$(obj) += $(RDMA_FLAGS)))
+$(foreach obj, $(CCAN_RDMA_OBJS), $(eval CFLAGS_rdma_core/ccan/$(obj) += $(RDMA_FLAGS)))
+CFLAGS_cmd_ioctl.o += $(BASE_RDMA_FLAGS)
+CFLAGS_devx.o += $(BASE_RDMA_FLAGS)
 
 # Sources.
 SRCS-$(CONFIG_RTE_LIBRTE_MLX5_MDEV_PMD) += mlx5_mdev.c
@@ -70,6 +75,13 @@ SRCS-$(CONFIG_RTE_LIBRTE_MLX5_MDEV_PMD) += mlx5_mdev_dbrec.c
 SRCS-$(CONFIG_RTE_LIBRTE_MLX5_MDEV_PMD) += mlx5_prm_commands.c
 SRCS-$(CONFIG_RTE_LIBRTE_MLX5_MDEV_PMD) += cmd_ioctl.c
 SRCS-$(CONFIG_RTE_LIBRTE_MLX5_MDEV_PMD) += devx.c
+SRCS-$(CONFIG_RTE_LIBRTE_MLX5_MDEV_PMD) += rdma_core/device.c
+SRCS-$(CONFIG_RTE_LIBRTE_MLX5_MDEV_PMD) += rdma_core/cmd.c
+SRCS-$(CONFIG_RTE_LIBRTE_MLX5_MDEV_PMD) += rdma_core/init.c
+SRCS-$(CONFIG_RTE_LIBRTE_MLX5_MDEV_PMD) += rdma_core/sysfs.c
+SRCS-$(CONFIG_RTE_LIBRTE_MLX5_MDEV_PMD) += rdma_core/mlx5.c
+SRCS-$(CONFIG_RTE_LIBRTE_MLX5_MDEV_PMD) += rdma_core/ccan/str.c
+SRCS-$(CONFIG_RTE_LIBRTE_MLX5_MDEV_PMD) += rdma_core/ccan/list.c
 ifeq ($(CONFIG_RTE_LIBRTE_MLX5_MDEV_DLOPEN_DEPS),y)
 INSTALL-$(CONFIG_RTE_LIBRTE_MLX5_MDEV_PMD)-lib += $(LIB_GLUE)
 endif

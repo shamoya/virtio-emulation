@@ -93,10 +93,12 @@ static void prepare_attrs(struct ibv_command_buffer *cmd)
 
 static void finalize_attr(struct ib_uverbs_attr *attr)
 {
+#if 0
 	/* Only matches UVERBS_ATTR_TYPE_PTR_OUT */
 	if (attr->flags & UVERBS_ATTR_F_VALID_OUTPUT && attr->len)
 		VALGRIND_MAKE_MEM_DEFINED((void *)(uintptr_t)attr->data,
 					  attr->len);
+#endif
 }
 
 /*

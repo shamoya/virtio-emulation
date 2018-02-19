@@ -47,7 +47,7 @@ $(foreach obj, $(BASE_RDMA_OBJS), $(eval CFLAGS_rdma_core/$(obj) += $(RDMA_FLAGS
 $(foreach obj, $(CCAN_RDMA_OBJS), $(eval CFLAGS_rdma_core/ccan/$(obj) += $(RDMA_FLAGS)))
 CFLAGS_cmd_ioctl.o += $(BASE_RDMA_FLAGS)
 CFLAGS_devx.o += $(BASE_RDMA_FLAGS)
-CFLAGS_devx_uar.o += $(BASE_RDMA_FLAGS)
+CFLAGS_devx_uar.o += $(RDMA_FLAGS) -Wno-error=cast-qual
 
 # Sources.
 SRCS-$(CONFIG_RTE_LIBRTE_MLX5_MDEV_PMD) += mlx5_mdev.c

@@ -70,7 +70,8 @@ struct mdev_cq {
 	const struct rte_memzone *buf;
 	//struct ibv_cq ibvcq;
 	uint32_t out[MLX5_ST_SZ_DW(create_cq_out)];
-	uint64_t dbrec;
+	uint64_t dbr_phys_addr;
+	volatile uint32_t *dbr_addr;
 	uint32_t cqe_size;
 	uint32_t uar_page;
 	uint32_t cqn;
@@ -82,7 +83,8 @@ struct mdev_cq {
 struct mdev_eq {
 	struct mlx5_mdev_context *ctx;
 	const struct rte_memzone *buf;
-	uint64_t dbrec;
+	uint64_t dbr_phys_addr;
+	volatile uint32_t *dbr_addr;
 	uint32_t eqe_size;
 	uint32_t uar_page;
 	uint32_t cons_index;
@@ -99,14 +101,16 @@ struct mdev_tis {
 
 struct mdev_wq {
 	uint8_t wq_type;
-	uint32_t pd;
-	uint32_t uar_page;
-	uint32_t dbr_addr;
-	uint32_t hw_counter;
-	uint32_t sw_counter;
 	uint8_t stride_sz; /* The size of a WQ stride equals 2^log_wq_stride. */
 	uint8_t page_sz; /* The size of a WQ stride equals 2^log_wq_stride. */
 	uint8_t sz; /* The size of a WQ stride equals 2^log_wq_stride. */
+	uint32_t pd;
+	uint32_t uar_page;
+	uint64_t dbr_phys_addr;
+	volatile uint32_t *dbr_addr;
+	uint32_t hw_counter;
+	uint32_t sw_counter;
+	uint32_t wqe_cnt;
 	const struct rte_memzone *buf;
 };
 
@@ -118,8 +122,7 @@ struct mdev_sq {
 	struct mdev_wq wq;
 };
 
-int64_t mlx5_get_dbrec(struct mlx5_mdev_priv *priv);
-
+uint64_t mlx5_get_dbrec(struct mlx5_mdev_priv *priv);
 
 struct mdev_eq *
 mlx5_mdev_create_eq(struct mlx5_mdev_priv *priv,

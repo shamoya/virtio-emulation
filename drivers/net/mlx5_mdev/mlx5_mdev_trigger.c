@@ -31,25 +31,27 @@ priv_txq_start(struct priv *priv)
 
 	/* Add memory regions to Tx queues. */
 	for (i = 0; i != priv->txqs_n; ++i) {
-		unsigned int idx = 0;
-		struct mlx5_mr *mr;
+		//unsigned int idx = 0;
+		//struct mlx5_mr *mr;
 		struct mlx5_txq_ctrl *txq_ctrl = mlx5_priv_txq_get(priv, i);
 
 		if (!txq_ctrl)
 			continue;
+#if 0
 		LIST_FOREACH(mr, &priv->mr, next) {
 			priv_txq_mp2mr_reg(priv, &txq_ctrl->txq, mr->mp, idx++);
 			if (idx == MLX5_PMD_TX_MP_CACHE)
 				break;
 		}
+#endif
 		txq_alloc_elts(txq_ctrl);
-		txq_ctrl->ibv = mlx5_priv_txq_ibv_new(priv, i);
-		if (!txq_ctrl->ibv) {
+		txq_ctrl->mdev = mlx5_priv_txq_mdev_new(priv, i);
+		if (!txq_ctrl->mdev) {
 			ret = ENOMEM;
 			goto error;
 		}
 	}
-	ret = priv_tx_uar_remap(priv, priv->ctx->cmd_fd);
+	ret = 0; //priv_tx_uar_remap(priv, priv->ctx->cmd_fd);
 	if (ret)
 		goto error;
 	return ret;
@@ -158,8 +160,10 @@ mlx5_mdev_start(struct rte_eth_dev *dev)
 	priv_dev_interrupt_handler_install(priv, dev);
 	priv_unlock(priv);
 #endif
+	ERROR("%s: %d", __func__, __LINE__);
 	return 0;
 error:
+ERROR("%s: %d", __func__, __LINE__);
 	/* Rollback. */
 	dev->data->dev_started = 0;
 #if 0

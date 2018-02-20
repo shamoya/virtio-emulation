@@ -28,12 +28,12 @@ static int32_t ffsl(int64_t value)
 }
 
 
-int64_t mlx5_get_dbrec(struct mlx5_mdev_priv *priv)
+uint64_t mlx5_get_dbrec(struct mlx5_mdev_priv *priv)
 {
 	struct mlx5_mdev_db_page *page =
 			(struct mlx5_mdev_db_page *)priv->db_page;
 	int i, j;
-	uint64_t db_rec;
+	//uint64_t db_rec;
 	uint32_t cache_line_size = priv->dev_context->cache_line_size;
 
 	printf("oooOri in mlx5_get_dbrec start\n");
@@ -85,7 +85,7 @@ int64_t mlx5_get_dbrec(struct mlx5_mdev_priv *priv)
 	j = ffsl(page->free_records[i]);
 	--j;
 	page->free_records[i] &= ~(1UL << j);
-	db_rec = (uint64_t)page->rte_mz->iova + (i * 8 * sizeof(long) + j) * cache_line_size;
-	return db_rec;
+	//db_rec = (uint64_t)page->rte_mz->iova + (i * 8 * sizeof(long) + j) * cache_line_size;
+	return (i * 8 * sizeof(long) + j) * cache_line_size;
 }
 

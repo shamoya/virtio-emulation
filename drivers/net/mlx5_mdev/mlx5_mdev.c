@@ -225,7 +225,7 @@ mlx5_dev_close(struct rte_eth_dev *dev)
 	ret = mlx5_priv_rxq_verify(priv);
 	if (ret)
 		WARN("%p: some Rx Queues still remain", (void *)priv);
-	ret = mlx5_priv_txq_ibv_verify(priv);
+	ret = mlx5_priv_txq_mdev_verify(priv);
 	if (ret)
 		WARN("%p: some Verbs Tx queue still remain", (void *)priv);
 	ret = mlx5_priv_txq_verify(priv);
@@ -273,6 +273,7 @@ const struct eth_dev_ops mlx5_mdev_dev_ops = { // TODO...
         .dev_infos_get          = mlx5_mdev_infos_get,
         .tx_queue_setup = mlx5_tx_queue_setup,
         .dev_configure = mlx5_dev_configure,
+        .link_update = mlx5_link_update,
 };
 
 /*  */

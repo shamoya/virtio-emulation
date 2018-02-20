@@ -162,7 +162,7 @@ txq_scatter_v(struct mlx5_txq_data *txq, struct rte_mbuf **pkts,
 		ctrl = vreinterpretq_u8_u32((uint32x4_t) {
 				MLX5_OPC_MOD_MPW << 24 |
 				txq->wqe_ci << 8 | MLX5_OPCODE_TSO,
-				txq->qp_num_8s | ds, 0, 0});
+				txq->sq_num_8s | ds, 0, 0});
 		ctrl = vqtbl1q_u8(ctrl, ctrl_shuf_m);
 		vst1q_u8((void *)t_wqe, ctrl);
 		/* Fill ESEG in the header. */
@@ -293,7 +293,7 @@ txq_burst_v(struct mlx5_txq_data *txq, struct rte_mbuf **pkts, uint16_t pkts_n,
 	ctrl = vreinterpretq_u8_u32((uint32x4_t) {
 			MLX5_OPC_MOD_ENHANCED_MPSW << 24 |
 			txq->wqe_ci << 8 | MLX5_OPCODE_ENHANCED_MPSW,
-			txq->qp_num_8s | (pkts_n + 2),
+			txq->sq_num_8s | (pkts_n + 2),
 			comp_req,
 			txq->elts_head });
 	ctrl = vqtbl1q_u8(ctrl, ctrl_shuf_m);

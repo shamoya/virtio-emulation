@@ -160,7 +160,7 @@ txq_scatter_v(struct mlx5_txq_data *txq, struct rte_mbuf **pkts,
 		} while (--segs_n);
 		++wqe_ci;
 		/* Fill CTRL in the header. */
-		ctrl = _mm_set_epi32(0, 0, txq->qp_num_8s | ds,
+		ctrl = _mm_set_epi32(0, 0, txq->sq_num_8s | ds,
 				     MLX5_OPC_MOD_MPW << 24 |
 				     txq->wqe_ci << 8 | MLX5_OPCODE_TSO);
 		ctrl = _mm_shuffle_epi8(ctrl, shuf_mask_ctrl);
@@ -292,7 +292,7 @@ txq_burst_v(struct mlx5_txq_data *txq, struct rte_mbuf **pkts, uint16_t pkts_n,
 	}
 	/* Fill CTRL in the header. */
 	ctrl = _mm_set_epi32(txq->elts_head, comp_req,
-			     txq->qp_num_8s | (pkts_n + 2),
+			     txq->sq_num_8s | (pkts_n + 2),
 			     MLX5_OPC_MOD_ENHANCED_MPSW << 24 |
 				txq->wqe_ci << 8 | MLX5_OPCODE_ENHANCED_MPSW);
 	ctrl = _mm_shuffle_epi8(ctrl, shuf_mask_ctrl);

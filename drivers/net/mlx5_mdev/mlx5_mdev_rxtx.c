@@ -455,7 +455,7 @@ mlx5_tx_burst(void *dpdk_txq, struct rte_mbuf **pkts, uint16_t pkts_n)
 				/* NOP WQE. */
 				wqe->ctrl = (rte_v128u32_t){
 					rte_cpu_to_be_32(txq->wqe_ci << 8),
-					rte_cpu_to_be_32(txq->qp_num_8s | 1),
+					rte_cpu_to_be_32(txq->sq_num_8s | 1),
 					0,
 					0,
 				};
@@ -617,7 +617,7 @@ next_pkt:
 			wqe->ctrl = (rte_v128u32_t){
 				rte_cpu_to_be_32((txq->wqe_ci << 8) |
 						 MLX5_OPCODE_TSO),
-				rte_cpu_to_be_32(txq->qp_num_8s | ds),
+				rte_cpu_to_be_32(txq->sq_num_8s | ds),
 				0,
 				0,
 			};
@@ -631,7 +631,7 @@ next_pkt:
 			wqe->ctrl = (rte_v128u32_t){
 				rte_cpu_to_be_32((txq->wqe_ci << 8) |
 						 MLX5_OPCODE_SEND),
-				rte_cpu_to_be_32(txq->qp_num_8s | ds),
+				rte_cpu_to_be_32(txq->sq_num_8s | ds),
 				0,
 				0,
 			};
@@ -737,7 +737,7 @@ mlx5_mpw_close(struct mlx5_txq_data *txq, struct mlx5_mpw *mpw)
 	 * Store size in multiple of 16 bytes. Control and Ethernet segments
 	 * count as 2.
 	 */
-	mpw->wqe->ctrl[1] = rte_cpu_to_be_32(txq->qp_num_8s | (2 + num));
+	mpw->wqe->ctrl[1] = rte_cpu_to_be_32(txq->sq_num_8s | (2 + num));
 	mpw->state = MLX5_MPW_STATE_CLOSED;
 	if (num < 3)
 		++txq->wqe_ci;
@@ -955,7 +955,7 @@ mlx5_mpw_inline_close(struct mlx5_txq_data *txq, struct mlx5_mpw *mpw)
 	 * Store size in multiple of 16 bytes. Control and Ethernet segments
 	 * count as 2.
 	 */
-	mpw->wqe->ctrl[1] = rte_cpu_to_be_32(txq->qp_num_8s |
+	mpw->wqe->ctrl[1] = rte_cpu_to_be_32(txq->sq_num_8s |
 					     MLX5_WQE_DS(size));
 	mpw->state = MLX5_MPW_STATE_CLOSED;
 	inl->byte_cnt = rte_cpu_to_be_32(mpw->total_len | MLX5_INLINE_SEG);
@@ -1256,7 +1256,7 @@ mlx5_empw_close(struct mlx5_txq_data *txq, struct mlx5_mpw *mpw)
 	/* Store size in multiple of 16 bytes. Control and Ethernet segments
 	 * count as 2.
 	 */
-	mpw->wqe->ctrl[1] = rte_cpu_to_be_32(txq->qp_num_8s |
+	mpw->wqe->ctrl[1] = rte_cpu_to_be_32(txq->sq_num_8s |
 					     MLX5_WQE_DS(mpw->total_len));
 	mpw->state = MLX5_MPW_STATE_CLOSED;
 	ret = (mpw->total_len + (MLX5_WQE_SIZE - 1)) / MLX5_WQE_SIZE;

@@ -875,6 +875,9 @@ priv_link_start(struct priv *priv)
 
 	dev->tx_pkt_burst = priv_select_tx_function(priv, dev);
 	dev->rx_pkt_burst = priv_select_rx_function(priv, dev);
+
+	return; // FIXME: motih
+
 	err = priv_dev_traffic_enable(priv, dev);
 	if (err)
 		ERROR("%p: error occurred while configuring control flows: %s",
@@ -919,6 +922,10 @@ priv_link_update(struct priv *priv, int wait_to_complete)
 	int ver[3];
 	int ret;
 	struct rte_eth_link dev_link = dev->data->dev_link;
+
+	// TODO FIX this
+	priv_link_start(priv);
+	return 0;
 
 	if (uname(&utsname) == -1 ||
 	    sscanf(utsname.release, "%d.%d.%d",

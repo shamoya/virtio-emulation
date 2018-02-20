@@ -67,10 +67,10 @@ mdev_priv_create_cq(struct mlx5_mdev_context *ctx, struct mdev_cq *cq)
 	MLX5_SET(cqc, cqc, cqe_sz, cqe_sz_to_mlx_sz(cq->cqe_size));
 	MLX5_SET(cqc, cqc, uar_page, cq->uar_page);
 	MLX5_SET(cqc, cqc, log_page_size, log2(cq->buf->len /4096)); // TODO: from where ? MTT ???
-	MLX5_SET64(cqc, cqc, dbr_addr, cq->dbrec);   // FIXME
+	MLX5_SET64(cqc, cqc, dbr_addr, cq->dbr_phys_addr);
 	MLX5_SET(cqc, cqc, log_cq_size, log2(cq->ncqe)); // WAS: cq->buf->len
 	MLX5_SET(cqc, cqc, oi, 0);
-	printf("mdev_priv_create_cq uar %x, dbrec = %lx\n",cq->uar_page, cq->dbrec);
+	printf("mdev_priv_create_cq uar %x, dbrec = %lx\n",cq->uar_page, cq->dbr_phys_addr);
 	err = mlx5_mdev_cmd_exec(ctx, in, sizeof(in), cq->out, sizeof(cq->out));
 	if (err)
 		return (err);
@@ -131,7 +131,7 @@ mdev_priv_create_sq(struct mlx5_mdev_context *ctx __rte_unused,
 	wqc = MLX5_ADDR_OF(sqc, sqc, wq);
 	MLX5_SET(wq, wqc, wq_type, 0x1);
 	MLX5_SET(wq, wqc, pd, sq->wq.pd);
-	MLX5_SET64(wq, wqc, dbr_addr, sq->wq.dbr_addr);
+	MLX5_SET64(wq, wqc, dbr_addr, sq->wq.dbr_phys_addr);
 	MLX5_SET(wq, wqc, log_wq_stride, 6);
 	MLX5_SET(wq, wqc, log_wq_pg_sz, log2(sq->wq.buf->len /4096));
 	MLX5_SET(wq, wqc, log_wq_sz, log2(sq->wq.buf->len>>6));
@@ -205,20 +205,22 @@ mlx5_mdev_create_cq(struct mlx5_mdev_priv *priv,
 	struct mdev_cq *cq;
 	struct mlx5_mdev_context *ctx = priv->dev_context;
 	uint32_t ncqe, cq_size;
+	uint64_t offset = mlx5_get_dbrec(priv);
 	int ret;
 
 
-	if (!cq_attr->cqe) {
+	if (!cq_attr->cqe || (offset == -1ULL)) {
 		return NULL;
 	}
 	cq = rte_zmalloc("struct ibv_cq", sizeof(*cq), ctx->cache_line_size); // TODO: make it numa node aware ?
 	if(!cq)
 		return NULL;
-	ncqe = 1UL << log2above(cq_attr->cqe + 1);
+	cq->ncqe = log2above(cq_attr->cqe + 1);;
+	ncqe = 1UL << cq->ncqe;
 	cq_size = ncqe * cqe_size;
-	cq->dbrec = mlx5_get_dbrec(priv);
-	if (!cq->dbrec)
-		goto err_spl;
+	cq->cqe_size = cqe_size;
+	cq->dbr_addr = (void *)((char *)(priv->db_page->rte_mz->addr) + offset);
+	cq->dbr_phys_addr = priv->db_page->rte_mz->iova + offset;
 	cq->uar_page = ctx->uar;
 	/* Fill info for create CQ */
 	cq->eqn = cq_attr->eqn;
@@ -232,7 +234,7 @@ mlx5_mdev_create_cq(struct mlx5_mdev_priv *priv,
 	return cq;
 err_ccq:
 	//mlx5_mdev_dealloc_uar(ctx, cq->uar_page); // fixme : remove
-err_spl:
+//err_spl:
 	//if (cq->buf)
 	//	mdev_dealloc_cq_buf(ctx, cq->buf);
 	//if (cq->dbrec)
@@ -276,7 +278,10 @@ mlx5_mdev_create_sq(struct mlx5_mdev_priv *priv,
 	struct mlx5_mdev_context *ctx = priv->dev_context;
 	int ret;
 	struct mdev_sq *sq;
+	uint64_t offset = mlx5_get_dbrec(priv);
 
+	if (offset == -1ULL)
+		return NULL;
 	sq = rte_zmalloc("sq", sizeof(*sq), ctx->cache_line_size);
 	if(!sq)
 		return NULL;
@@ -284,11 +289,13 @@ mlx5_mdev_create_sq(struct mlx5_mdev_priv *priv,
 	sq->wq.pd = sq_attr->wq.pd;
 	sq->cqn = sq_attr->cqn;
 	sq->tisn = sq_attr->tisn;
-	sq->wq.dbr_addr = mlx5_get_dbrec(priv);
+	sq->wq.dbr_phys_addr = priv->db_page->rte_mz->iova + offset;
+	sq->wq.dbr_addr = (void *)((char *)(priv->db_page->rte_mz->addr) + offset);
 	sq->wq.uar_page = ctx->uar;
+	sq->wq.wqe_cnt = log2above(sq_attr->nelements);
 	sq->wq.buf = rte_eth_dma_zone_reserve(ctx->owner,
 	                                      "sq_buffer", 0,
-	                                      sq_attr->nelements * 64, 4096,
+	                                      (1 << sq->wq.wqe_cnt) * 64, 4096,
 	                                      priv->edev->data->numa_node);
 	ret = mdev_priv_create_sq(ctx, sq);
 	printf("create sq res == %d\n", ret);

@@ -138,7 +138,7 @@ struct priv {
 	LIST_HEAD(rxqibv, mlx5_rxq_ibv) rxqsibv; /* Verbs Rx queues. */
 	LIST_HEAD(hrxq, mlx5_hrxq) hrxqs; /* Verbs Hash Rx queues. */
 	LIST_HEAD(txq, mlx5_txq_ctrl) txqsctrl; /* DPDK Tx queues. */
-	LIST_HEAD(txqibv, mlx5_txq_ibv) txqsibv; /* Verbs Tx queues. */
+	LIST_HEAD(txqmdev, mlx5_txq_mdev) txqsmdev; /* mdev Tx queues. */
 	/* Verbs Indirection tables. */
 	LIST_HEAD(ind_tables, mlx5_ind_table_ibv) ind_tbls;
 	uint32_t link_speed_capa; /* Link speed capabilities. */

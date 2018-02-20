@@ -161,7 +161,7 @@ struct mlx5_txq_data {
 	uint16_t max_inline; /* Multiple of RTE_CACHE_LINE_SIZE to inline. */
 	uint16_t inline_max_packet_sz; /* Max packet size for inlining. */
 	uint16_t mr_cache_idx; /* Index of last hit entry. */
-	uint32_t qp_num_8s; /* QP number shifted by 8. */
+	uint32_t sq_num_8s; /* SQ number shifted by 8. */
 	uint64_t offloads; /* Offloads for Tx Queue. */
 	volatile struct mlx5_cqe (*cqes)[]; /* Completion queue. */
 	volatile void *wqes; /* Work queue (use volatile to write into). */
@@ -174,11 +174,13 @@ struct mlx5_txq_data {
 } __rte_cache_aligned;
 
 /* Verbs Rx queue elements. */
-struct mlx5_txq_ibv {
-	LIST_ENTRY(mlx5_txq_ibv) next; /* Pointer to the next element. */
+struct mlx5_txq_mdev {
+	LIST_ENTRY(mlx5_txq_mdev) next; /* Pointer to the next element. */
 	rte_atomic32_t refcnt; /* Reference counter. */
-	struct ibv_cq *cq; /* Completion Queue. */
-	struct ibv_qp *qp; /* Queue Pair. */
+	struct mdev_cq *cq; /* Completion Queue. */
+	struct mdev_sq *sq; /* Send Queue. */
+	struct mdev_eq *eq; /* Event Queue. */
+	struct mdev_tis *tis; /* TIS */
 };
 
 /* TX queue control descriptor. */
@@ -189,7 +191,7 @@ struct mlx5_txq_ctrl {
 	unsigned int socket; /* CPU socket ID for allocations. */
 	unsigned int max_inline_data; /* Max inline data. */
 	unsigned int max_tso_header; /* Max TSO header size. */
-	struct mlx5_txq_ibv *ibv; /* Verbs queue object. */
+	struct mlx5_txq_mdev *mdev; /* Verbs queue object. */
 	struct mlx5_txq_data txq; /* Data path structure. */
 	off_t uar_mmap_offset; /* UAR mmap offset for non-primary process. */
 	volatile void *bf_reg_orig; /* Blueflame register from verbs. */
@@ -245,11 +247,11 @@ int mlx5_tx_queue_setup(struct rte_eth_dev *, uint16_t, uint16_t, unsigned int,
 			const struct rte_eth_txconf *);
 void mlx5_tx_queue_release(void *);
 int priv_tx_uar_remap(struct priv *priv, int fd);
-struct mlx5_txq_ibv *mlx5_priv_txq_ibv_new(struct priv *, uint16_t);
-struct mlx5_txq_ibv *mlx5_priv_txq_ibv_get(struct priv *, uint16_t);
-int mlx5_priv_txq_ibv_release(struct priv *, struct mlx5_txq_ibv *);
-int mlx5_priv_txq_ibv_releasable(struct priv *, struct mlx5_txq_ibv *);
-int mlx5_priv_txq_ibv_verify(struct priv *);
+struct mlx5_txq_mdev *mlx5_priv_txq_mdev_new(struct priv *, uint16_t);
+struct mlx5_txq_mdev *mlx5_priv_txq_mdev_get(struct priv *, uint16_t);
+int mlx5_priv_txq_mdev_release(struct priv *, struct mlx5_txq_mdev *);
+int mlx5_priv_txq_mdev_releasable(struct priv *, struct mlx5_txq_mdev *);
+int mlx5_priv_txq_mdev_verify(struct priv *);
 struct mlx5_txq_ctrl *mlx5_priv_txq_new(struct priv *, uint16_t,
 					uint16_t, unsigned int,
 					const struct rte_eth_txconf *);

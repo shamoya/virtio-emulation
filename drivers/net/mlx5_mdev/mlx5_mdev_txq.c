@@ -359,19 +359,15 @@ is_empw_burst_func(eth_tx_burst_t tx_pkt_burst)
  * @return
  *   The Verbs object initialised if it can be created.
  */
-struct mlx5_txq_ibv*
-mlx5_priv_txq_ibv_new(struct priv *priv, uint16_t idx)
+struct mlx5_txq_mdev*
+mlx5_priv_txq_mdev_new(struct priv *priv, uint16_t idx)
 {
 	struct mlx5_txq_data *txq_data = (*priv->txqs)[idx];
 	struct mlx5_txq_ctrl *txq_ctrl =
 		container_of(txq_data, struct mlx5_txq_ctrl, txq);
-	struct mlx5_txq_ibv tmpl;
-	//struct mlx5_txq_ibv *txq_ibv;
+	struct mlx5_txq_mdev tmpl;
+	struct mlx5_txq_mdev *txq_mdev;
 	union {
-		struct ibv_qp_init_attr_ex init;
-		struct ibv_cq_init_attr_ex cq;
-		struct ibv_qp_attr mod;
-		struct ibv_cq_ex cq_attr;
 		struct mdev_eq_attr meq_attr;
 		struct mdev_cq_attr mcq_attr;
 		struct mdev_tis_attr tis_attr;
@@ -399,11 +395,10 @@ mlx5_priv_txq_ibv_new(struct priv *priv, uint16_t idx)
 		ERROR("MLX5_ENABLE_CQE_COMPRESSION must never be set");
 		goto error;
 	}
-	memset(&tmpl, 0, sizeof(struct mlx5_txq_ibv));
+	memset(&tmpl, 0, sizeof(struct mlx5_txq_mdev));
+
 	/* MRs will be registered in mp2mr[] later. */
-	attr.cq = (struct ibv_cq_init_attr_ex){
-		.comp_mask = 0,
-	};
+
 	cqe_n = ((desc / MLX5_TX_COMP_THRESH) - 1) ?
 		((desc / MLX5_TX_COMP_THRESH) - 1) : 1;
 	if (is_empw_burst_func(tx_pkt_burst))
@@ -484,9 +479,6 @@ mlx5_priv_txq_ibv_new(struct priv *priv, uint16_t idx)
 		goto error;
 	}
 
-	ERROR("UNDER CONSTRUCTION");
-	goto error;
-
 #if 0
 	attr.sq_attr = (struct mdev_sq_attr){
 		/* Move the QP to this state. */
@@ -516,12 +508,14 @@ mlx5_priv_txq_ibv_new(struct priv *priv, uint16_t idx)
 		ERROR("%p: QP state to IBV_QPS_RTS failed", (void *)txq_ctrl);
 		goto error;
 	}
-	txq_ibv = rte_calloc_socket(__func__, 1, sizeof(struct mlx5_txq_ibv), 0,
+#endif
+	txq_mdev = rte_calloc_socket(__func__, 1, sizeof(struct mlx5_txq_mdev), 0,
 				    txq_ctrl->socket);
-	if (!txq_ibv) {
+	if (!txq_mdev) {
 		ERROR("%p: cannot allocate memory", (void *)txq_ctrl);
 		goto error;
 	}
+#if 0
 	obj.cq.in = tmpl.cq;
 	obj.cq.out = &cq_info;
 	obj.qp.in = tmpl.qp;
@@ -540,27 +534,14 @@ mlx5_priv_txq_ibv_new(struct priv *priv, uint16_t idx)
 		      "it should be set to %u", RTE_CACHE_LINE_SIZE);
 		goto error;
 	}
-#if 0
-	/* TODO: MOTIH use this as a hint
-	 * +               struct struct ibv_cq *mcq = to_mdcq(obj->cq.in);
-+
-+               obj->cq.out->buf = mcq->buf->addr;
-+               // obj->cq.out->cq_uar = mcq->uar_page;  TODO: write virt address here
-+               obj->cq.out->cqe_cnt = mcq->ncqe;
-+               obj->cq.out->cqe_size = mcq->cqe_size;
-+               obj->cq.out->cqn = mcq->cqn;
-+               //obj->cq.out->dbrec = mcq->dbrec;   TODO: write virt address here
-+       }
-	 *
-	 */
 
-	txq_data->cqe_n = log2above(mcq->cq_info.  ); //cqe_cnt
-	txq_data->qp_num_8s = tmpl.qp->qp_num << 8;
+	txq_data->cqe_n = mcq->ncqe;
+	txq_data->sq_num_8s = msq->sqn << 8;
 	txq_data->wqes = msq->wq.buf->addr; //buf;
-	txq_data->wqe_n = log2above(msq->wq.   .wqe_cnt);
-	txq_data->qp_db = &msq->wq.dbr_addr[MLX5_SND_DBR];
-	txq_ctrl->bf_reg_orig = wq.qp.bf.reg;
-	txq_data->cq_db = mcq->dbrec; // cq_info.dbrec;
+	txq_data->wqe_n = msq->wq.wqe_cnt;
+	txq_data->qp_db = &(msq->wq.dbr_addr[MLX5_SND_DBR]);
+	/// txq_ctrl->bf_reg_orig = wq.qp.bf.reg;
+	txq_data->cq_db = mcq->dbr_addr; // cq_info.dbrec;
 
 	txq_data->cqes =
 		(volatile struct mlx5_cqe (*)[])
@@ -571,10 +552,12 @@ mlx5_priv_txq_ibv_new(struct priv *priv, uint16_t idx)
 #endif
 	txq_data->wqe_ci = 0;
 	txq_data->wqe_pi = 0;
-	txq_ibv->qp = tmpl.qp;
-	txq_ibv->cq = tmpl.cq;
-	rte_atomic32_inc(&txq_ibv->refcnt);
-
+	txq_mdev->sq = msq;
+	txq_mdev->cq = mcq;
+	txq_mdev->eq = meq;
+	txq_mdev->tis = mtis;
+	rte_atomic32_inc(&txq_mdev->refcnt);
+#if 0
 	// TODO: Is this ctx->uar ?
 	if (qp.comp_mask & MLX5DV_QP_MASK_UAR_MMAP_OFFSET) {
 		txq_ctrl->uar_mmap_offset = qp.uar_mmap_offset;
@@ -584,10 +567,11 @@ mlx5_priv_txq_ibv_new(struct priv *priv, uint16_t idx)
 	}
 	DEBUG("%p: Verbs Tx queue %p: refcnt %d", (void *)priv,
 	      (void *)txq_ibv, rte_atomic32_read(&txq_ibv->refcnt));
-	LIST_INSERT_HEAD(&priv->txqsibv, txq_ibv, next);
-	priv->verbs_alloc_ctx.type = MLX5_VERBS_ALLOC_TYPE_NONE;
-	return txq_ibv;
 #endif
+	LIST_INSERT_HEAD(&priv->txqsmdev, txq_mdev, next);
+	priv->verbs_alloc_ctx.type = MLX5_VERBS_ALLOC_TYPE_NONE;
+	ERROR("================= Return success");
+	return txq_mdev;
 error:
 	if (msq)
 		claim_zero(mlx5_mdev_destroy_sq(msq));
@@ -610,8 +594,8 @@ error:
  * @return
  *   The Verbs object if it exists.
  */
-struct mlx5_txq_ibv*
-mlx5_priv_txq_ibv_get(struct priv *priv, uint16_t idx)
+struct mlx5_txq_mdev*
+mlx5_priv_txq_mdev_get(struct priv *priv, uint16_t idx)
 {
 	struct mlx5_txq_ctrl *txq_ctrl;
 
@@ -620,13 +604,13 @@ mlx5_priv_txq_ibv_get(struct priv *priv, uint16_t idx)
 	if (!(*priv->txqs)[idx])
 		return NULL;
 	txq_ctrl = container_of((*priv->txqs)[idx], struct mlx5_txq_ctrl, txq);
-	if (txq_ctrl->ibv) {
-		rte_atomic32_inc(&txq_ctrl->ibv->refcnt);
+	if (txq_ctrl->mdev) {
+		rte_atomic32_inc(&txq_ctrl->mdev->refcnt);
 		DEBUG("%p: Verbs Tx queue %p: refcnt %d", (void *)priv,
-		      (void *)txq_ctrl->ibv,
-		      rte_atomic32_read(&txq_ctrl->ibv->refcnt));
+		      (void *)txq_ctrl->mdev,
+		      rte_atomic32_read(&txq_ctrl->mdev->refcnt));
 	}
-	return txq_ctrl->ibv;
+	return txq_ctrl->mdev;
 }
 
 /**
@@ -641,17 +625,19 @@ mlx5_priv_txq_ibv_get(struct priv *priv, uint16_t idx)
  *   0 on success, errno on failure.
  */
 int
-mlx5_priv_txq_ibv_release(struct priv *priv, struct mlx5_txq_ibv *txq_ibv)
+mlx5_priv_txq_mdev_release(struct priv *priv, struct mlx5_txq_mdev *txq_mdev)
 {
 	(void)priv;
-	assert(txq_ibv);
+	assert(txq_mdev);
 	DEBUG("%p: Verbs Tx queue %p: refcnt %d", (void *)priv,
-	      (void *)txq_ibv, rte_atomic32_read(&txq_ibv->refcnt));
-	if (rte_atomic32_dec_and_test(&txq_ibv->refcnt)) {
-		claim_zero(mlx5_glue->destroy_qp(txq_ibv->qp));
-		claim_zero(mlx5_glue->destroy_cq(txq_ibv->cq));
-		LIST_REMOVE(txq_ibv, next);
-		rte_free(txq_ibv);
+	      (void *)txq_mdev, rte_atomic32_read(&txq_mdev->refcnt));
+	if (rte_atomic32_dec_and_test(&txq_mdev->refcnt)) {
+		claim_zero(mlx5_mdev_destroy_sq(txq_mdev->sq));
+		claim_zero(mlx5_mdev_destroy_cq(txq_mdev->cq));
+		claim_zero(mlx5_mdev_destroy_tis(txq_mdev->tis));
+		claim_zero(mlx5_mdev_destroy_eq(txq_mdev->eq));
+		LIST_REMOVE(txq_mdev, next);
+		rte_free(txq_mdev);
 		return 0;
 	}
 	return EBUSY;
@@ -666,11 +652,11 @@ mlx5_priv_txq_ibv_release(struct priv *priv, struct mlx5_txq_ibv *txq_ibv)
  *   Verbs Tx queue object.
  */
 int
-mlx5_priv_txq_ibv_releasable(struct priv *priv, struct mlx5_txq_ibv *txq_ibv)
+mlx5_priv_txq_mdev_releasable(struct priv *priv, struct mlx5_txq_mdev *txq_mdev)
 {
 	(void)priv;
-	assert(txq_ibv);
-	return (rte_atomic32_read(&txq_ibv->refcnt) == 1);
+	assert(txq_mdev);
+	return (rte_atomic32_read(&txq_mdev->refcnt) == 1);
 }
 
 /**
@@ -682,14 +668,14 @@ mlx5_priv_txq_ibv_releasable(struct priv *priv, struct mlx5_txq_ibv *txq_ibv)
  * @return the number of object not released.
  */
 int
-mlx5_priv_txq_ibv_verify(struct priv *priv)
+mlx5_priv_txq_mdev_verify(struct priv *priv)
 {
 	int ret = 0;
-	struct mlx5_txq_ibv *txq_ibv;
+	struct mlx5_txq_mdev *txq_mdev;
 
-	LIST_FOREACH(txq_ibv, &priv->txqsibv, next) {
-		DEBUG("%p: Verbs Tx queue %p still referenced", (void *)priv,
-		      (void *)txq_ibv);
+	LIST_FOREACH(txq_mdev, &priv->txqsmdev, next) {
+		DEBUG("%p: mdev Tx queue %p still referenced", (void *)priv,
+		      (void *)txq_mdev);
 		++ret;
 	}
 	return ret;
@@ -868,7 +854,7 @@ mlx5_priv_txq_get(struct priv *priv, uint16_t idx)
 				    txq);
 		unsigned int i;
 
-		mlx5_priv_txq_ibv_get(priv, idx);
+		mlx5_priv_txq_mdev_get(priv, idx);
 		for (i = 0; i != MLX5_PMD_TX_MP_CACHE; ++i) {
 			struct mlx5_mr *mr = NULL;
 
@@ -908,12 +894,12 @@ mlx5_priv_txq_release(struct priv *priv, uint16_t idx)
 	txq = container_of((*priv->txqs)[idx], struct mlx5_txq_ctrl, txq);
 	DEBUG("%p: Tx queue %p: refcnt %d", (void *)priv,
 	      (void *)txq, rte_atomic32_read(&txq->refcnt));
-	if (txq->ibv) {
+	if (txq->mdev) {
 		int ret;
 
-		ret = mlx5_priv_txq_ibv_release(priv, txq->ibv);
+		ret = mlx5_priv_txq_mdev_release(priv, txq->mdev);
 		if (!ret)
-			txq->ibv = NULL;
+			txq->mdev = NULL;
 	}
 	for (i = 0; i != MLX5_PMD_TX_MP_CACHE; ++i) {
 		if (txq->txq.mp2mr[i]) {

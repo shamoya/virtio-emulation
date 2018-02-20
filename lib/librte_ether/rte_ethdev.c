@@ -1283,6 +1283,7 @@ rte_eth_dev_start(uint16_t port_id)
 	}
 
 	diag = (*dev->dev_ops->dev_start)(dev);
+	printf("=========%s: diag %d\n", __func__, diag);
 	if (diag == 0)
 		dev->data->dev_started = 1;
 	else

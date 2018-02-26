@@ -1062,7 +1062,7 @@ struct mlx5_ifc_mkc_bits {
 	u8         reserved_at_1c0[0x1b];
 	u8         log_page_size[0x5];
 
-	u8         reserved_at_1e0[0x20];
+	u8         pas_umem_id[0x20];
 };
 
 struct mlx5_ifc_create_mkey_out_bits {
@@ -1097,7 +1097,7 @@ struct mlx5_ifc_create_mkey_in_bits {
 
 	u8         reserved_at_320[0x560];
 
-	u8         klm_pas_mtt[0x20];
+	u8         klm_pas_mtt[][0x20]; // TODO: MOTIH was : klm_pas_mtt[0][0x20];
 };
 
 struct mlx5_ifc_destroy_mkey_out_bits {
@@ -1453,7 +1453,9 @@ struct mlx5_ifc_cqc_bits {
 	u8         reserved_at_160[0x8];
 	u8         producer_counter[0x18];
 
-	u8         reserved_at_180[0x40];
+	u8         pas_umem_id[0x20];
+
+	u8         dbr_umem_id[0x20];
 
 	u8         dbr_addr[0x40];
 };

@@ -43,11 +43,14 @@ BASE_RDMA_FLAGS = -I$(SRCDIR) -I$(SRCDIR)/rdma_core -Wno-unused-parameter \
 RDMA_FLAGS = $(BASE_RDMA_FLAGS) -Wno-pointer-arith -Wno-sign-compare
 BASE_RDMA_OBJS = $(sort $(patsubst %.c,%.o,$(notdir $(wildcard $(SRCDIR)/rdma_core/*.c))))
 CCAN_RDMA_OBJS = $(sort $(patsubst %.c,%.o,$(notdir $(wildcard $(SRCDIR)/rdma_core/ccan/*.c))))
+INFI_RDMA_OBJS = $(sort $(patsubst %.c,%.o,$(notdir $(wildcard $(SRCDIR)/rdma_core/infiniband/*.c))))
 $(foreach obj, $(BASE_RDMA_OBJS), $(eval CFLAGS_rdma_core/$(obj) += $(RDMA_FLAGS)))
 $(foreach obj, $(CCAN_RDMA_OBJS), $(eval CFLAGS_rdma_core/ccan/$(obj) += $(RDMA_FLAGS)))
+$(foreach obj, $(INFI_RDMA_OBJS), $(eval CFLAGS_rdma_core/infiniband/$(obj) += $(RDMA_FLAGS)))
 CFLAGS_cmd_ioctl.o += $(BASE_RDMA_FLAGS)
 CFLAGS_devx.o += $(BASE_RDMA_FLAGS)
 CFLAGS_devx_uar.o += $(RDMA_FLAGS) -Wno-error=cast-qual
+CFLAGS_devx_dbrec.o += $(RDMA_FLAGS)
 
 # Sources.
 SRCS-$(CONFIG_RTE_LIBRTE_MLX5_MDEV_PMD) += mlx5_mdev.c
@@ -77,6 +80,7 @@ SRCS-$(CONFIG_RTE_LIBRTE_MLX5_MDEV_PMD) += mlx5_prm_commands.c
 SRCS-$(CONFIG_RTE_LIBRTE_MLX5_MDEV_PMD) += cmd_ioctl.c
 SRCS-$(CONFIG_RTE_LIBRTE_MLX5_MDEV_PMD) += devx.c
 SRCS-$(CONFIG_RTE_LIBRTE_MLX5_MDEV_PMD) += devx_uar.c
+SRCS-$(CONFIG_RTE_LIBRTE_MLX5_MDEV_PMD) += devx_dbrec.c
 SRCS-$(CONFIG_RTE_LIBRTE_MLX5_MDEV_PMD) += rdma_core/device.c
 SRCS-$(CONFIG_RTE_LIBRTE_MLX5_MDEV_PMD) += rdma_core/cmd.c
 SRCS-$(CONFIG_RTE_LIBRTE_MLX5_MDEV_PMD) += rdma_core/init.c

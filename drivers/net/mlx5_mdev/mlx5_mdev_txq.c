@@ -570,7 +570,55 @@ mlx5_priv_txq_mdev_new(struct priv *priv, uint16_t idx)
 #endif
 	LIST_INSERT_HEAD(&priv->txqsmdev, txq_mdev, next);
 	priv->verbs_alloc_ctx.type = MLX5_VERBS_ALLOC_TYPE_NONE;
-	ERROR("================= Return success");
+	ERROR("================= Return success (sqn = %d)", msq->sqn);
+
+	ERROR("========= Testing RX (in Tx path) ===========");
+	{
+#define MOTIH_NRXQS 4
+		int i;
+		struct mdev_rqt *rqt;
+		struct mdev_tir *tir;
+		struct mdev_rqt_attr rqt_attr;
+		struct mdev_tir_attr tir_attr;
+		uint32_t rqn_arr[MOTIH_NRXQS];
+		struct mdev_rq_attr rq_attr;
+		struct mdev_rq *rq[MOTIH_NRXQS];
+		rq_attr.ctx = priv->mpriv.dev_context;
+		rq_attr.cqn = mcq->cqn;
+		rq_attr.csid = 0;
+		rq_attr.nelements = cqe_n;
+		rq_attr.rlkey = 0;
+		rq_attr.vsd = 0;
+		rq_attr.wq.pd = priv->mpriv.dev_context->pd;
+		for (i = 0; i < MOTIH_NRXQS; i++) {
+			rq[i] = mlx5_mdev_create_rq(&priv->mpriv, &rq_attr);
+			if ((void *)rq[i] == NULL) {
+				ERROR("mlx5_mdev_create_rq FAILED");
+				goto error;
+			} else {
+				rqn_arr[i] = rq[i]->rqn;
+				ERROR("======= rqn  %d ======", rq[i]->rqn);
+			}
+		}
+		rqt_attr.log_num_rq = log2above(MOTIH_NRXQS);
+		rqt_attr.rqn = rqn_arr;
+		rqt = mlx5_mdev_create_rqt(&priv->mpriv, &rqt_attr);
+		if ((void *)rqt == NULL) {
+			ERROR("mlx5_mdev_create_rqt FAILED");
+			goto error;
+		} else {
+			ERROR("======= rqtn  %d ======", rqt->rqtn);
+		}
+		tir_attr.disp_type = MLX5_TIR_DISP_DIRECT;
+		tir_attr.direct.rqn = rqn_arr[0];
+		tir_attr.td = priv->mpriv.dev_context->td;
+		tir = mlx5_mdev_create_tir(&priv->mpriv, &tir_attr);
+		if ((void *)tir == NULL) {
+			ERROR("mlx5_mdev_create_tir FAILED");
+		} else {
+			ERROR("======= tirn  %d ======", tir->tirn);
+		}
+	}
 	return txq_mdev;
 error:
 	if (msq)

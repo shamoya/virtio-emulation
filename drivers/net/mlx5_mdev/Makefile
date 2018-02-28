@@ -55,7 +55,7 @@ CFLAGS_devx_dbrec.o += $(RDMA_FLAGS)
 # Sources.
 SRCS-$(CONFIG_RTE_LIBRTE_MLX5_MDEV_PMD) += mlx5_mdev.c
 ifneq ($(CONFIG_RTE_LIBRTE_MLX5_MDEV_DLOPEN_DEPS),y)
-SRCS-$(CONFIG_RTE_LIBRTE_MLX5_MDEV_PMD) += mlx5_mdev_glue.c
+#SRCS-$(CONFIG_RTE_LIBRTE_MLX5_MDEV_PMD) += mlx5_mdev_glue.c
 endif
 SRCS-$(CONFIG_RTE_LIBRTE_MLX5_MDEV_PMD) += mlx5_mdev_rxq.c
 SRCS-$(CONFIG_RTE_LIBRTE_MLX5_MDEV_PMD) += mlx5_mdev_txq.c

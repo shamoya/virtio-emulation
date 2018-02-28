@@ -21,6 +21,9 @@
 #include <rte_errno.h>
 #include <rte_flow.h>
 
+#ifndef USE_VFIO_PCI
+#include "devx.h"
+#endif
 #include "mlx5_mdev_utils.h"
 #include "mlx5_mdev_rxtx.h"
 #include "mlx5_mdev_autoconf.h"
@@ -217,7 +220,7 @@ int mlx5_link_update(struct rte_eth_dev *, int);
 int mlx5_dev_set_mtu(struct rte_eth_dev *, uint16_t);
 int mlx5_dev_get_flow_ctrl(struct rte_eth_dev *, struct rte_eth_fc_conf *);
 int mlx5_dev_set_flow_ctrl(struct rte_eth_dev *, struct rte_eth_fc_conf *);
-int mlx5_mdev_device_to_pci_addr(const struct ibv_device *,
+int mlx5_ibv_device_to_pci_addr(const struct ibv_device *,
 				struct rte_pci_addr *);
 void mlx5_dev_link_status_handler(void *);
 void mlx5_dev_interrupt_handler(void *);

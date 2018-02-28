@@ -24,6 +24,9 @@
 #include <rte_eal_memconfig.h>
 #include <rte_kvargs.h>
 
+#ifndef USE_VFIO_PCI
+#include "devx.h"
+#endif
 #include "mdev_lib.h"
 #include "mlx5_mdev.h"
 #include "mlx5_mdev_utils.h"
@@ -261,7 +264,8 @@ static void mlx5_mdev_infos_get(struct rte_eth_dev *edev, // TODO: review field-
         info->speed_capa         = ETH_LINK_SPEED_10G;
 }
 
-static int mlx5_mdev_uninit(struct rte_eth_dev *edev)
+static int __rte_unused
+mlx5_mdev_uninit(struct rte_eth_dev *edev)
 {
 
 	edev = edev;
@@ -502,8 +506,8 @@ mlx5_mdev_args(struct mlx5_dev_config *config, struct rte_devargs *devargs)
 	return 0;
 }
 
-#if 0
-static struct rte_pci_driver mlx5_driver;
+#ifndef USE_VFIO_PCI
+static struct rte_pci_driver mlx5_mdev_driver;
 #endif
 
 /*
@@ -627,6 +631,10 @@ mlx5_mdev_init(struct rte_eth_dev *edev)
 	struct ibv_device **list;
 	struct ibv_device *mdev_dev;
 #endif
+#ifndef USE_VFIO_PCI
+	struct devx_device **list;
+	void *device = NULL;
+#endif
 	int err = 0;
 #if 0
 	struct ibv_context *attr_ctx = NULL;
@@ -685,25 +693,65 @@ mlx5_mdev_init(struct rte_eth_dev *edev)
 	default:
 		break;
 	}
-	INFO("Device \"%04x:%02x:%02x.%1x\" (SR-IOV: %s, TUNNEL: %s)",
-		mlx5_dev[idx].pci_addr.domain,
-		mlx5_dev[idx].pci_addr.bus,
-		mlx5_dev[idx].pci_addr.devid,
-		mlx5_dev[idx].pci_addr.function,
-		sriov ? "true" : "false",
-		tunnel_en ? "true" : "false");
+#ifndef USE_VFIO_PCI
+	list = devx_get_device_list(&i);
+	if (list == NULL) {
+		assert(errno);
+		if (errno == ENOSYS)
+			ERROR("cannot list devices, is ib_uverbs loaded ?");
+		return -errno;
+	}
+	assert(i >= 0);
+	/*
+	 * For each listed device, check related sysfs entry against
+	 * the provided PCI ID.
+	 */
+	while (i != 0) {
+		struct rte_pci_addr pci_addr;
 
+		--i;
+		DEBUG("checking device \"%s\"", list[i]->name);
+		if (devx_device_to_pci_addr(list[i], &pci_addr))
+			continue;
+		if ((pci_dev->addr.domain != pci_addr.domain) ||
+		    (pci_dev->addr.bus != pci_addr.bus) ||
+		    (pci_dev->addr.devid != pci_addr.devid) ||
+		    (pci_dev->addr.function != pci_addr.function))
+			continue;
 
+		INFO("PCI information matches, using device \"%s\"", list[i]->name);
+		device = devx_open_device(list[i]); // TODO: Add this to mdev_open_device
+		err = errno;
+		if (device == NULL) {
+			devx_free_device_list(list);
+			switch (err) {
+			case 0:
+				ERROR("cannot access device");
+				return -ENODEV;
+			case EINVAL:
+				ERROR("cannot use device");
+				return -EINVAL;
+
+			assert(err >0);
+			return -err;
+			}
+		}
+	}
+#endif /* USE_VFIO_PCI */
 	priv->dev = edev;
 	edev->dev_ops = &mlx5_mdev_dev_ops;
 	//attr_ctx = mlx5_glue->open_device(list[i]);
 	priv->mpriv.base_addr = (void *)pci_dev->mem_resource[0].addr;
 	priv->mpriv.dev_context =
-		mdev_open_device(priv->dev, priv->mpriv.base_addr, alloc_pinned);
+		mdev_open_device(priv->dev, priv->mpriv.base_addr,
+		                 alloc_pinned, device);
 	priv->mpriv.edev = edev;
 	err = errno;
 	if (priv->mpriv.dev_context == NULL) {
 		// mlx5_glue->free_device_list(list);
+#ifndef USE_VFIO_PCI
+		devx_free_device_list(list);
+#endif
 		switch (err) {
 		case 0:
 			ERROR("cannot access device, is driver loaded?");
@@ -715,6 +763,15 @@ mlx5_mdev_init(struct rte_eth_dev *edev)
 		assert(err > 0);
 		return -err;
 	}
+	INFO("Device \"%04x:%02x:%02x.%1x\" (SR-IOV: %s, TUNNEL: %s)",
+		mlx5_dev[idx].pci_addr.domain,
+		mlx5_dev[idx].pci_addr.bus,
+		mlx5_dev[idx].pci_addr.devid,
+		mlx5_dev[idx].pci_addr.function,
+		sriov ? "true" : "false",
+		tunnel_en ? "true" : "false");
+
+
 
 	DEBUG("device opened");
 	ERROR(" ========= device opened ==============");
@@ -752,7 +809,7 @@ mlx5_mdev_init(struct rte_eth_dev *edev)
 		goto error;
 	INFO("%u port(s) detected", device_attr.orig_attr.phys_port_cnt);
 #else
-	device_attr.orig_attr.phys_port_cnt = MLX5_CAP_GEN(priv->mpriv.dev_context, num_ports);
+	device_attr.orig_attr.phys_port_cnt = 1;   // FIXME: MLX5_CAP_GEN(priv->mpriv.dev_context, num_ports);
 	if (device_attr.orig_attr.phys_port_cnt > 1) {
 		ERROR("Supports only 1:1 mapping between ports and pci_device");
 		goto error;
@@ -869,6 +926,19 @@ mlx5_mdev_init(struct rte_eth_dev *edev)
 			ERROR("PD allocation failure");
 			err = ENOMEM;
 			goto port_error;
+		}
+#endif
+#ifndef USE_VFIO_PCI
+		// TODO : do we need to allocate PD and TD ?
+		err = mlx5_mdev_alloc_pd(priv->mpriv.dev_context);
+		if (err) {
+			ERROR("PD allocation failure");
+			//goto port_error;
+		}
+		err = mlx5_mdev_alloc_td(priv->mpriv.dev_context);
+		if (err) {
+			ERROR("TD allocation failure");
+			//goto port_error;
 		}
 #endif
 		mlx5_dev[idx].ports |= test;
@@ -989,7 +1059,7 @@ mlx5_mdev_init(struct rte_eth_dev *edev)
 			config.cqe_comp = 0;
 		}
 #endif
-		err = priv_uar_init_primary(priv);
+		err = priv_uar_init_primary(priv); // FIXME
 		if (err) {
 			ERROR(" =========%s: %d", __FUNCTION__, __LINE__);
 			goto port_error;
@@ -1144,7 +1214,6 @@ static const struct rte_pci_id mlx5_mdev_pci_id_map[] = {
 /**
  * Driver initialization routine.
  */
-RTE_INIT(rte_mlx5_pmd_init);
 static void
 rte_mlx5_pmd_init(void)
 {
@@ -1160,6 +1229,7 @@ rte_mlx5_pmd_init(void)
 	/* Match the size of Rx completion entry to the size of a cacheline. */
 	if (RTE_CACHE_LINE_SIZE == 128)
 		setenv("MLX5_CQE_SIZE", "128", 0);
+#if 0 // FIXME MOTIH: return this check
 	if (mlx5_glue_init())
 		return;
 	assert(mlx5_glue);
@@ -1178,8 +1248,16 @@ rte_mlx5_pmd_init(void)
 		return;
 	}
 	mlx5_glue->fork_init();
-	//rte_pci_register(&mlx5_driver);
+#endif // if 0
+#ifndef USE_VFIO_PCI
+	rte_pci_register(&mlx5_mdev_driver);
+#endif
 }
+
+RTE_INIT(rte_mlx5_pmd_init);
+
+
+#ifdef USE_VFIO_PCI
 
 static int mlx5_mdev_pci_probe(__rte_unused struct rte_pci_driver *pci_drv,
 			   struct rte_pci_device *pdev)
@@ -1193,6 +1271,7 @@ static int mlx5_mdev_pci_remove(struct rte_pci_device *pci_dev)
 	return rte_eth_dev_pci_generic_remove(pci_dev, mlx5_mdev_uninit);
 }
 
+
 static struct rte_pci_driver mlx5_mdev_pci_driver = {
 	.id_table	= mlx5_mdev_pci_id_map,
 	.drv_flags	= RTE_PCI_DRV_NEED_MAPPING,
@@ -1203,3 +1282,42 @@ static struct rte_pci_driver mlx5_mdev_pci_driver = {
 RTE_PMD_REGISTER_PCI(net_mlx5_mdev, mlx5_mdev_pci_driver);
 RTE_PMD_REGISTER_PCI_TABLE(net_mlx5_mdev, mlx5_mdev_pci_id_map);
 RTE_PMD_REGISTER_KMOD_DEP(net_mlx5_mdev, "* igb_uio | uio_pci_generic | vfio-pci");
+
+#else /* USE_VFIO_PCI */
+
+static int
+mlx5_mdev_pci_probe(struct rte_pci_driver *pci_drv,
+   	            struct rte_pci_device *pci_dev)
+{
+	struct rte_eth_dev *eth_dev;
+	int ret;
+
+	assert(pci_drv == &mlx5_mdev_driver);
+
+	eth_dev = rte_eth_dev_pci_allocate(pci_dev, sizeof(struct priv));
+	if (!eth_dev) {
+		ERROR("rte_eth_dev_pci_allocate Failed");
+		return -ENOMEM;
+	}
+	ret = mlx5_mdev_init(eth_dev);
+	if (ret) {
+		ERROR("mlx5_mdev_init Failed (%d)", ret);
+		rte_eth_dev_pci_release(eth_dev);
+	}
+	return ret;
+}
+
+static struct rte_pci_driver mlx5_mdev_driver = {
+	.driver = {
+		.name = MLX5_MDEV_DRIVER_NAME
+	},
+	.id_table = mlx5_mdev_pci_id_map,
+	.probe = mlx5_mdev_pci_probe,
+	.drv_flags = RTE_PCI_DRV_INTR_LSC | RTE_PCI_DRV_INTR_RMV,
+};
+
+RTE_PMD_EXPORT_NAME(net_mlx5_mdev, __COUNTER__);
+RTE_PMD_REGISTER_PCI_TABLE(net_mlx5_mdev, mlx5_mdev_pci_id_map);
+RTE_PMD_REGISTER_KMOD_DEP(net_mlx5_mdev, "* ib_uverbs & mlx5_core");
+
+#endif /* USE_VFIO_PCI */

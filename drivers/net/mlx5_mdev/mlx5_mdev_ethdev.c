@@ -1151,7 +1151,7 @@ out:
  *   0 on success, -1 on failure and errno is set.
  */
 int
-mlx5_mdev_device_to_pci_addr(const struct ibv_device *device,
+mlx5_ibv_device_to_pci_addr(const struct ibv_device *device,
 			     struct rte_pci_addr *pci_addr)
 {
 	FILE *file;

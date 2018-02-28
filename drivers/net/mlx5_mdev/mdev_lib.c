@@ -17,6 +17,9 @@
 #include <rte_ethdev.h>
 #include <rte_eth_ctrl.h>
 
+#ifndef USE_VFIO_PCI
+#include "devx.h"
+#endif
 #include "mlx5_mdev_utils.h"
 #include "mdev_lib.h"
 
@@ -34,6 +37,7 @@
 int mlx5_mdev_cmd_exec(struct mlx5_mdev_context *ctx, void *in, int ilen,
 			  void *out, int olen)
 {
+#ifdef USE_VFIO_PCI
 	struct mlx5_mdev_cmd *cmd = ctx->cmd;
 	char *cin = (char *)in;
 	char *cout = (char *)out;
@@ -89,9 +93,13 @@ int mlx5_mdev_cmd_exec(struct mlx5_mdev_context *ctx, void *in, int ilen,
 	}
 
 	return cmd->entry.status_own;
+#else /* no USE_VFIO_PCI */
+	return devx_cmd(ctx->devx_ctx, in, ilen, out, olen);
+#endif
 }
 
-static int mlx5_mdev_cmd_init(struct mlx5_mdev_context *ctx)
+static int __rte_unused
+mlx5_mdev_cmd_init(struct mlx5_mdev_context *ctx)
 {
 	const struct mlx5_mdev_memzone *mz;
 
@@ -120,7 +128,8 @@ static int mlx5_mdev_cmd_init(struct mlx5_mdev_context *ctx)
 	return 0;
 }
 
-static void mlx5_mdev_cmd_enable_reset_nic_interface(struct mlx5_mdev_context *ctx)
+static void __rte_unused
+mlx5_mdev_cmd_enable_reset_nic_interface(struct mlx5_mdev_context *ctx)
 {
 	MDEV_WRITE_32_BE((uint32_t)(ctx->cmd_pa >> 32), &ctx->iseg->cmdq_pa_h);
 	MDEV_WRITE_32_BE((uint32_t)(ctx->cmd_pa), &ctx->iseg->cmdq_pa_l_sz);
@@ -128,7 +137,8 @@ static void mlx5_mdev_cmd_enable_reset_nic_interface(struct mlx5_mdev_context *c
 }
 
 
-static int mlx5_mdev_enable_hca(struct mlx5_mdev_context *ctx)
+static int __rte_unused
+mlx5_mdev_enable_hca(struct mlx5_mdev_context *ctx)
 {
 	uint32_t in[MLX5_ST_SZ_DW(enable_hca_in)]   = {0};
 	uint32_t out[MLX5_ST_SZ_DW(enable_hca_out)] = {0};
@@ -137,7 +147,8 @@ static int mlx5_mdev_enable_hca(struct mlx5_mdev_context *ctx)
 	return mlx5_mdev_cmd_exec(ctx, in, sizeof(in), out, sizeof(out));
 }
 
-static void mlx5_mdev_disable_hca(struct mlx5_mdev_context *ctx)
+static void __rte_unused
+mlx5_mdev_disable_hca(struct mlx5_mdev_context *ctx)
 {
 	uint32_t in[MLX5_ST_SZ_DW(disable_hca_in)]   = {0};
 	uint32_t out[MLX5_ST_SZ_DW(disable_hca_out)] = {0};
@@ -146,7 +157,8 @@ static void mlx5_mdev_disable_hca(struct mlx5_mdev_context *ctx)
 	mlx5_mdev_cmd_exec(ctx, in, sizeof(in), out, sizeof(out));
 }
 
-static int mlx5_mdev_init_hca(struct mlx5_mdev_context *ctx)
+static int __rte_unused
+mlx5_mdev_init_hca(struct mlx5_mdev_context *ctx)
 {
 	uint32_t in[MLX5_ST_SZ_DW(init_hca_in)]   = {0};
 	uint32_t out[MLX5_ST_SZ_DW(init_hca_out)] = {0};
@@ -163,7 +175,8 @@ static int mlx5_mdev_init_hca(struct mlx5_mdev_context *ctx)
 	return status;
 }
 
-static int mlx5_mdev_set_issi(struct mlx5_mdev_context *ctx)
+static int __rte_unused
+mlx5_mdev_set_issi(struct mlx5_mdev_context *ctx)
 {
 	uint32_t query_in[MLX5_ST_SZ_DW(query_issi_in)]   = {0};
 	uint32_t query_out[MLX5_ST_SZ_DW(query_issi_out)] = {0};
@@ -258,7 +271,8 @@ static int mlx5_mdev_give_pages(struct mlx5_mdev_context *ctx, uint16_t func_id,
 	return status;
 }
 
-static int mlx5_mdev_satisfy_startup_pages(struct mlx5_mdev_context *ctx, int boot)
+static int __rte_unused
+mlx5_mdev_satisfy_startup_pages(struct mlx5_mdev_context *ctx, int boot)
 {
 	uint16_t function_id;
 	int32_t	npages = 0;
@@ -272,7 +286,8 @@ static int mlx5_mdev_satisfy_startup_pages(struct mlx5_mdev_context *ctx, int bo
 	return res;
 }
 
-static void mlx5_mdev_teardown_hca(struct mlx5_mdev_context *ctx)
+static void __rte_unused
+mlx5_mdev_teardown_hca(struct mlx5_mdev_context *ctx)
 {
 	uint32_t out[MLX5_ST_SZ_DW(teardown_hca_out)] = {0};
 	uint32_t in[MLX5_ST_SZ_DW(teardown_hca_in)]   = {0};
@@ -326,14 +341,16 @@ static void mlx5_mdev_get_hca_cap_ftn(struct mlx5_mdev_context *ctx)
 	       sizeof(ctx->cap.ftn));
 }
 
-static void mlx5_mdev_get_hca_cap(struct mlx5_mdev_context *ctx)
+static void __rte_unused
+mlx5_mdev_get_hca_cap(struct mlx5_mdev_context *ctx)
 {
 	mlx5_mdev_get_hca_cap_gen(ctx);
 	mlx5_mdev_get_hca_cap_eth(ctx);
 	mlx5_mdev_get_hca_cap_ftn(ctx);
 }
 
-static int mlx5_mdev_check_hca_cap(struct mlx5_mdev_context *ctx)
+static int __rte_unused
+mlx5_mdev_check_hca_cap(struct mlx5_mdev_context *ctx)
 {
 	if ((MLX5_CAP_GEN(ctx, port_type) != MLX5_CAP_PORT_TYPE_ETH)	    ||
 	    (MLX5_CAP_GEN(ctx, num_ports) > 1)				    ||
@@ -361,7 +378,8 @@ static void mlx5_mdev_query_nic_vport_mac_addr(struct mlx5_mdev_context *ctx,
 					nic_vport_context.permanent_address));
 }
 
-static int mlx5_mdev_set_edev_addr(struct mlx5_mdev_context *ctx)
+static int __rte_unused
+mlx5_mdev_set_edev_addr(struct mlx5_mdev_context *ctx)
 {
 	struct rte_eth_dev *edev = ctx->owner;
 
@@ -376,12 +394,13 @@ static int mlx5_mdev_set_edev_addr(struct mlx5_mdev_context *ctx)
 	return 0;
 }
 
-static void mlx5_mdev_unset_edev_addr(struct mlx5_mdev_context *ctx)
+static void __rte_unused
+mlx5_mdev_unset_edev_addr(struct mlx5_mdev_context *ctx)
 {
 	rte_free(((struct rte_eth_dev *)(ctx->owner))->data->mac_addrs);
 }
 
-static int mlx5_mdev_alloc_pd(struct mlx5_mdev_context *ctx)
+int mlx5_mdev_alloc_pd(struct mlx5_mdev_context *ctx)
 {
 	uint32_t in[MLX5_ST_SZ_DW(alloc_pd_in)]   = {0};
 	uint32_t out[MLX5_ST_SZ_DW(alloc_pd_out)] = {0};
@@ -399,7 +418,8 @@ static int mlx5_mdev_alloc_pd(struct mlx5_mdev_context *ctx)
 	return status;
 }
 
-static void mlx5_mdev_dealloc_pd(struct mlx5_mdev_context *ctx)
+static void __rte_unused
+mlx5_mdev_dealloc_pd(struct mlx5_mdev_context *ctx)
 {
 	uint32_t in[MLX5_ST_SZ_DW(dealloc_pd_in)]   = {0};
 	uint32_t out[MLX5_ST_SZ_DW(dealloc_pd_out)] = {0};
@@ -409,7 +429,8 @@ static void mlx5_mdev_dealloc_pd(struct mlx5_mdev_context *ctx)
 	mlx5_mdev_cmd_exec(ctx, in, sizeof(in), out, sizeof(out));
 }
 
-static int mlx5_mdev_alloc_td(struct mlx5_mdev_context *ctx)
+int __rte_unused
+mlx5_mdev_alloc_td(struct mlx5_mdev_context *ctx)
 {
 	uint32_t in[MLX5_ST_SZ_DW(alloc_transport_domain_in)]   = {0};
 	uint32_t out[MLX5_ST_SZ_DW(alloc_transport_domain_out)] = {0};
@@ -429,7 +450,8 @@ static int mlx5_mdev_alloc_td(struct mlx5_mdev_context *ctx)
 	return status;
 }
 
-static void mlx5_mdev_dealloc_td(struct mlx5_mdev_context *ctx)
+static void __rte_unused
+mlx5_mdev_dealloc_td(struct mlx5_mdev_context *ctx)
 {
 	uint32_t in[MLX5_ST_SZ_DW(dealloc_transport_domain_in)]   = {0};
 	uint32_t out[MLX5_ST_SZ_DW(dealloc_transport_domain_out)] = {0};
@@ -440,7 +462,8 @@ static void mlx5_mdev_dealloc_td(struct mlx5_mdev_context *ctx)
 	mlx5_mdev_cmd_exec(ctx, in, sizeof(in), out, sizeof(out));
 }
 
-static int mlx5_mdev_alloc_uar(struct mlx5_mdev_context *ctx)
+static int __rte_unused
+mlx5_mdev_alloc_uar(struct mlx5_mdev_context *ctx)
 {
 	uint32_t in[MLX5_ST_SZ_DW(alloc_uar_in)]   = {0};
 	uint32_t out[MLX5_ST_SZ_DW(alloc_uar_out)] = {0};
@@ -459,7 +482,8 @@ static int mlx5_mdev_alloc_uar(struct mlx5_mdev_context *ctx)
 
 struct mlx5_mdev_context *mdev_open_device(void *owner,
 					void *iseg,
-					alloc_dma_memory_t *alloc_function)
+					alloc_dma_memory_t *alloc_function,
+					void *devx_ctx)
 {
 	struct mlx5_mdev_context *ctx = MDEV_ALLOC(sizeof(struct mlx5_mdev_context), 64);
 	int err;
@@ -471,10 +495,22 @@ struct mlx5_mdev_context *mdev_open_device(void *owner,
 	ctx->iseg = iseg;
 	ctx->cache_line_size = RTE_CACHE_LINE_SIZE; //todo: should be based on system
 	ctx->page_size = 4096; //todo should be based on system
-
+	ctx->devx_ctx = devx_ctx;
+#ifndef USE_VFIO_PCI
+	mlx5_mdev_get_hca_cap(ctx);
+	err = mlx5_mdev_check_hca_cap(ctx);
+	if (err)
+		goto error;
+	err = mlx5_mdev_set_edev_addr(ctx);
+	if (err)
+		goto error;
+	return ctx;
+error:
+	rte_free(ctx);
+	return NULL;
+#else
 	if (MDEV_READ_16_BE(&ctx->iseg->cmdif_rev) != 5)
 			return NULL;
-
 	err = mlx5_mdev_cmd_init(ctx);
 	if (err)
 		return NULL;
@@ -520,5 +556,7 @@ err_teardown_hca:
 	mlx5_mdev_teardown_hca(ctx);
 err_disable_hca:
 	mlx5_mdev_disable_hca(ctx);
+	rte_free(ctx);
 	return NULL;
+#endif
 }

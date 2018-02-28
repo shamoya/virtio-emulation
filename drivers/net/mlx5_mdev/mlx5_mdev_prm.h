@@ -19,7 +19,7 @@
 #endif
 
 #include <rte_vect.h>
-#include "mlx5_autoconf.h"
+#include "mlx5_mdev_autoconf.h"
 
 /* Get CQE owner bit. */
 #define MLX5_CQE_OWNER(op_own) ((op_own) & MLX5_CQE_OWNER_MASK)

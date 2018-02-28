@@ -53,6 +53,7 @@ typedef struct mlx5_mdev_memzone * (alloc_dma_memory_t)(void *owner, const char 
 
 struct mlx5_mdev_context {
 	void *owner;
+	void *devx_ctx;	/* devx device */
 	uint32_t page_size;
 	uint32_t cache_line_size;
 	struct mlx5_iseg *iseg; /* todo: should be removed when using ibv */
@@ -79,5 +80,10 @@ int mlx5_mdev_cmd_exec(struct mlx5_mdev_context *ctx, void *in, int ilen,
 
 struct mlx5_mdev_context * mdev_open_device(void *owner,
 					void *iseg,
-					alloc_dma_memory_t alloc_function);
+					alloc_dma_memory_t alloc_function,
+					void *devx_ctx);
+
+int mlx5_mdev_alloc_pd(struct mlx5_mdev_context *ctx);
+int mlx5_mdev_alloc_td(struct mlx5_mdev_context *ctx);
+
 #endif

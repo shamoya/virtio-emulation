@@ -8,6 +8,7 @@
 #include <rte_malloc.h>
 #include <unistd.h>
 #include <dlfcn.h>
+#include <sys/mman.h>
 
 #include "mlx5_glue.h"
 #include "mlx5_defs.h"
@@ -195,6 +196,7 @@ mlx5_vdpa_report_notify_area(int vid, int qid, uint64_t *offset,
 	struct vdpa_priv_list *list;
 	long page_size = sysconf(_SC_PAGESIZE);
 	uint16_t notify_stride;
+	void * addr;
 
 	dev_id = rte_vhost_get_vdpa_device_id(vid);
 	if (dev_id < 0)
@@ -205,9 +207,11 @@ mlx5_vdpa_report_notify_area(int vid, int qid, uint64_t *offset,
 	notify_stride = list->priv->caps.notify_stride;
 	*offset = 0 | mlx5_vdpa_get_notify_offset(qid * notify_stride);
 	*offset = *offset * page_size;
-	*size = notify_stride;
+	*size = 0x1000;
 	DRV_LOG(DEBUG, "Notify offset is 0x%" PRIx64 " size is %" PRId64,
 		*offset, *size);
+	addr = mmap(NULL, *size, PROT_READ | PROT_WRITE, MAP_SHARED, list->priv->ctx->cmd_fd, *offset);
+	*((uint32_t *)addr + 1) =0x51;
 	return 0;
 error:
 	DRV_LOG(DEBUG, "Invliad vDPA device id %d", vid);
@@ -375,6 +379,15 @@ static const struct rte_pci_id mlx5_vdpa_pci_id_map[] = {
 		RTE_PCI_DEVICE(PCI_VENDOR_ID_MELLANOX,
 			       PCI_DEVICE_ID_MELLANOX_CONNECTX5BFVF)
 	},
+	{
+		RTE_PCI_DEVICE(PCI_VENDOR_ID_MELLANOX,
+			       PCI_DEVICE_ID_MELLANOX_CONNECTX5EX)
+	},
+	{
+		RTE_PCI_DEVICE(PCI_VENDOR_ID_MELLANOX,
+			       PCI_DEVICE_ID_MELLANOX_CONNECTX5BF)
+	},
+
 	{
 		.vendor_id = 0
 	}

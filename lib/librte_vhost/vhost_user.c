@@ -2046,8 +2046,8 @@ skip_to_reply:
 	if (vdpa_dev && virtio_is_ready(dev) &&
 			!(dev->flags & VIRTIO_DEV_VDPA_CONFIGURED) &&
 			msg.request.master == VHOST_USER_SET_VRING_ENABLE) {
-		if (vdpa_dev->ops->dev_conf)
-			vdpa_dev->ops->dev_conf(dev->vid);
+//		if (vdpa_dev->ops->dev_conf)
+//			vdpa_dev->ops->dev_conf(dev->vid);
 		dev->flags |= VIRTIO_DEV_VDPA_CONFIGURED;
 		if (vhost_user_host_notifier_ctrl(dev->vid, true) != 0) {
 			RTE_LOG(INFO, VHOST_CONFIG,

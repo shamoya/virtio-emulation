@@ -1451,9 +1451,9 @@ mlx5_pci_probe(struct rte_pci_driver *pci_drv __rte_unused,
 	};
 	/* Device speicific configuration. */
 	switch (pci_dev->id.device_id) {
-	case PCI_DEVICE_ID_MELLANOX_CONNECTX5BF:
-		dev_config.txqs_vec = MLX5_VPMD_MAX_TXQS_BLUEFIELD;
-		break;
+//	case PCI_DEVICE_ID_MELLANOX_CONNECTX5BF:
+//		dev_config.txqs_vec = MLX5_VPMD_MAX_TXQS_BLUEFIELD;
+//		break;
 	case PCI_DEVICE_ID_MELLANOX_CONNECTX4VF:
 	case PCI_DEVICE_ID_MELLANOX_CONNECTX4LXVF:
 	case PCI_DEVICE_ID_MELLANOX_CONNECTX5VF:
@@ -1571,15 +1571,7 @@ static const struct rte_pci_id mlx5_pci_id_map[] = {
 	},
 	{
 		RTE_PCI_DEVICE(PCI_VENDOR_ID_MELLANOX,
-			       PCI_DEVICE_ID_MELLANOX_CONNECTX5EX)
-	},
-	{
-		RTE_PCI_DEVICE(PCI_VENDOR_ID_MELLANOX,
 			       PCI_DEVICE_ID_MELLANOX_CONNECTX5EXVF)
-	},
-	{
-		RTE_PCI_DEVICE(PCI_VENDOR_ID_MELLANOX,
-			       PCI_DEVICE_ID_MELLANOX_CONNECTX5BF)
 	},
 	{
 		RTE_PCI_DEVICE(PCI_VENDOR_ID_MELLANOX,

@@ -18,6 +18,9 @@
 /** Driver Static values in the absence of device VIRTIO emulation support */
 #define MLX5_VDPA_SW_MAX_VIRTQS_SUPPORTED 1
 
+/** Driver Static values in the absence of device VIRTIO emulation support */
+#define MLX5_VDPA_SW_NOTIFY_STRIDE 4
+
 #define MLX5_VDPA_FEATURES ((1ULL << VHOST_USER_F_PROTOCOL_FEATURES) | \
 			    (1ULL << VIRTIO_F_VERSION_1))
 
@@ -34,6 +37,7 @@ struct mlx5_vdpa_caps {
 	uint16_t max_num_virtqs;
 	uint64_t virtio_net_features;
 	uint64_t virtio_protocol_features;
+	uint16_t notify_stride; /* Size in bytes of each queue notify area. */
 };
 
 struct vdpa_priv {
@@ -41,8 +45,8 @@ struct vdpa_priv {
 	struct ibv_context *ctx; /* Device context. */
 	struct rte_vdpa_dev_addr dev_addr;
 	struct mlx5_vdpa_caps caps;
-
 };
+
 struct vdpa_priv_list {
 	TAILQ_ENTRY(vdpa_priv_list) next;
 	struct vdpa_priv *priv;
@@ -114,20 +118,6 @@ mlx5_vdpa_get_protocol_features(int did, uint64_t *features)
 	return 0;
 }
 
-static struct rte_vdpa_dev_ops mlx5_vdpa_ops = {
-	.get_queue_num = mlx5_vdpa_get_queue_num,
-	.get_features = mlx5_vdpa_get_vdpa_features,
-	.get_protocol_features = mlx5_vdpa_get_protocol_features,
-	.dev_conf = NULL,
-	.dev_close = NULL,
-	.set_vring_state = NULL,
-	.set_features = NULL,
-	.migration_done = NULL,
-	.get_vfio_group_fd = NULL,
-	.get_vfio_device_fd = NULL,
-	.get_notify_area = NULL,
-};
-
 static int
 mlx5_vdpa_query_virtio_caps(struct vdpa_priv *priv)
 {
@@ -170,6 +160,11 @@ mlx5_vdpa_query_virtio_caps(struct vdpa_priv *priv)
 	 * For now only set protocol features support
 	 */
 	priv->caps.max_num_virtqs = MLX5_VDPA_SW_MAX_VIRTQS_SUPPORTED;
+	/*
+	 * TODO (shahafs): Take from QUERY HCA CAP Device Emulation Capabilities.
+	 * For now only set protocol features support
+	 */
+	priv->caps.notify_stride = MLX5_VDPA_SW_NOTIFY_STRIDE;
 	priv->caps.virtio_net_features = MLX5_VDPA_FEATURES;
 	priv->caps.virtio_protocol_features = MLX5_VDPA_PROTOCOL_FEATURES;
 	DRV_LOG(DEBUG, "Virtio Caps:");
@@ -178,6 +173,60 @@ mlx5_vdpa_query_virtio_caps(struct vdpa_priv *priv)
 	DRV_LOG(DEBUG, "	features_bits=0x%" PRIx64, priv->caps.virtio_net_features);
 	return 0;
 }
+
+#define MLX5_IB_MMAP_CMD_SHIFT 8
+#define MLX5_IB_MMAP_CMD_MASK ((1 << MLX5_IB_MMAP_CMD_SHIFT) - 1)
+#define MLX5_IB_CMD_SIZE 8
+#define MLX5_IB_MMAP_VIRTIO_NOTIFY 9
+static inline int
+mlx5_vdpa_get_notify_offset(uint16_t offset)
+{
+	uint16_t ext_offset = MLX5_IB_MMAP_CMD_SHIFT + MLX5_IB_CMD_SIZE;
+	return (((offset >> MLX5_IB_MMAP_CMD_SHIFT) << ext_offset) |
+		(MLX5_IB_MMAP_VIRTIO_NOTIFY << MLX5_IB_MMAP_CMD_SHIFT) |
+		(offset & MLX5_IB_MMAP_CMD_MASK));
+}
+
+static int
+mlx5_vdpa_report_notify_area(int vid, int qid, uint64_t *offset,
+			     uint64_t *size)
+{
+	int dev_id;
+	struct vdpa_priv_list *list;
+	long page_size = sysconf(_SC_PAGESIZE);
+	uint16_t notify_stride;
+
+	dev_id = rte_vhost_get_vdpa_device_id(vid);
+	if (dev_id < 0)
+		goto error;
+	list = find_priv_resource_by_did(dev_id);
+	if (!list)
+		goto error;
+	notify_stride = list->priv->caps.notify_stride;
+	*offset = 0 | mlx5_vdpa_get_notify_offset(qid * notify_stride);
+	*offset = *offset * page_size;
+	*size = notify_stride;
+	DRV_LOG(DEBUG, "Notify offset is 0x%" PRIx64 " size is %" PRId64,
+		*offset, *size);
+	return 0;
+error:
+	DRV_LOG(DEBUG, "Invliad vDPA device id %d", vid);
+	return -1;
+}
+
+static struct rte_vdpa_dev_ops mlx5_vdpa_ops = {
+	.get_queue_num = mlx5_vdpa_get_queue_num,
+	.get_features = mlx5_vdpa_get_vdpa_features,
+	.get_protocol_features = mlx5_vdpa_get_protocol_features,
+	.dev_conf = NULL,
+	.dev_close = NULL,
+	.set_vring_state = NULL,
+	.set_features = NULL,
+	.migration_done = NULL,
+	.get_vfio_group_fd = NULL,
+	.get_vfio_device_fd = NULL,
+	.get_notify_area = mlx5_vdpa_report_notify_area,
+};
 
 /**
  * DPDK callback to register a PCI device.

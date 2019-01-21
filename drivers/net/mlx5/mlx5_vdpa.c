@@ -43,6 +43,7 @@ struct mlx5_vdpa_caps {
 
 struct vdpa_priv {
 	int id; /* vDPA device id. */
+	struct rte_pci_device *pdev;
 	struct ibv_context *ctx; /* Device context. */
 	struct rte_vdpa_dev_addr dev_addr;
 	struct mlx5_vdpa_caps caps;
@@ -87,7 +88,7 @@ mlx5_vdpa_get_queue_num(int did, uint32_t *queue_num)
         DRV_LOG(ERR, "Invalid device id: %d", did);
         return -1;
     }
-    *queue_num = list_elem->priv->caps.max_num_virtqs;
+    *queue_num = MLX5_VDPA_SW_MAX_VIRTQS_SUPPORTED;
     return 0;
 }
 
@@ -101,7 +102,7 @@ mlx5_vdpa_get_vdpa_features(int did, uint64_t *features)
 		DRV_LOG(ERR, "Invalid device id: %d", did);
 		return -1;
 	}
-	*features = list_elem->priv->caps.virtio_net_features;
+	*features = MLX5_VDPA_FEATURES;
 	return 0;
 }
 
@@ -115,87 +116,85 @@ mlx5_vdpa_get_protocol_features(int did, uint64_t *features)
 		DRV_LOG(ERR, "Invalid device id: %d", did);
 		return -1;
 	}
-	*features = list_elem->priv->caps.virtio_protocol_features;
+	*features = MLX5_VDPA_PROTOCOL_FEATURES;
 	return 0;
 }
 
+//static int
+//mlx5_vdpa_query_virtio_caps(struct vdpa_priv *priv __rte_unused)
+//{
+//	uint32_t in[MLX5_ST_SZ_DW(query_hca_cap_in)] = {0};
+//	uint32_t out[MLX5_ST_SZ_DW(query_hca_cap_out)] = {0};
+//	uint32_t in_special[MLX5_ST_SZ_DW(query_special_contexts_in)] = {0};
+//	uint32_t out_special[MLX5_ST_SZ_DW(query_special_contexts_out)] = {0};
+//	uint8_t dump_mkey_reported = 0;
+//
+//	MLX5_SET(query_hca_cap_in, in, opcode, MLX5_CMD_OP_QUERY_HCA_CAP);
+//	MLX5_SET(query_hca_cap_in, in, op_mod,
+//			(MLX5_HCA_CAP_GENERAL << 1) |
+//			(MLX5_HCA_CAP_OPMOD_GET_CUR & 0x1));
+//	if (mlx5_glue->dv_devx_general_cmd(priv->ctx, in, sizeof(in),
+//                                       out, sizeof(out))) {
+//	    DRV_LOG(DEBUG, "Failed to Query Current HCA CAP section\n");
+//	    return -1;
+//	}
+//	dump_mkey_reported = MLX5_GET(cmd_hca_cap,
+//				      MLX5_ADDR_OF(query_hca_cap_out, out,
+//					           capability),
+//				      dump_fill_mkey);
+//	if (!dump_mkey_reported) {
+//	    DRV_LOG(DEBUG, "dump_fill_mkey is not supported\n");
+//	    return -1;
+//	}
+//	/* Query the actual dump key. */
+//	MLX5_SET(query_special_contexts_in, in_special, opcode,
+//		 MLX5_CMD_OP_QUERY_SPECIAL_CONTEXTS);
+//	if (mlx5_glue->dv_devx_general_cmd(priv->ctx, in_special, sizeof(in_special),
+//                                       out_special, sizeof(out_special))) {
+//	    DRV_LOG(DEBUG, "Failed to Query Special Contexts\n");
+//		return -1;
+//	}
+//	priv->caps.dump_mkey = MLX5_GET(query_special_contexts_out,
+//					out_special,
+//					dump_fill_mkey);
+//	/*
+//	 * TODO (idos): Take from QUERY HCA CAP Device Emulation Capabilities.
+//	 * For now only set protocol features support
+//	 */
+//	priv->caps.max_num_virtqs = MLX5_VDPA_SW_MAX_VIRTQS_SUPPORTED;
+//	/*
+//	 * TODO (shahafs): Take from QUERY HCA CAP Device Emulation Capabilities.
+//	 * For now only set protocol features support
+//	 */
+//	priv->caps.notify_stride = MLX5_VDPA_SW_NOTIFY_STRIDE;
+//	priv->caps.virtio_net_features = MLX5_VDPA_FEATURES;
+//	priv->caps.virtio_protocol_features = MLX5_VDPA_PROTOCOL_FEATURES;
+//	DRV_LOG(DEBUG, "Virtio Caps:");
+//	DRV_LOG(DEBUG, "	dump_mkey=0x%x ", priv->caps.dump_mkey);
+//	DRV_LOG(DEBUG, "	max_num_virtqs=0x%x ", priv->caps.max_num_virtqs);
+//	DRV_LOG(DEBUG, "	features_bits=0x%" PRIx64, priv->caps.virtio_net_features);
+//	return 0;
+//}
+
+//#define MLX5_IB_MMAP_CMD_SHIFT 8
+//#define MLX5_IB_MMAP_CMD_MASK ((1 << MLX5_IB_MMAP_CMD_SHIFT) - 1)
+//#define MLX5_IB_CMD_SIZE 8
+//#define MLX5_IB_MMAP_VIRTIO_NOTIFY 9
+//static inline int
+//mlx5_vdpa_get_notify_offset(uint16_t offset)
+//{
+//	uint16_t ext_offset = MLX5_IB_MMAP_CMD_SHIFT + MLX5_IB_CMD_SIZE;
+//	return (((offset >> MLX5_IB_MMAP_CMD_SHIFT) << ext_offset) |
+//		(MLX5_IB_MMAP_VIRTIO_NOTIFY << MLX5_IB_MMAP_CMD_SHIFT) |
+//		(offset & MLX5_IB_MMAP_CMD_MASK));
+//}
+
 static int
-mlx5_vdpa_query_virtio_caps(struct vdpa_priv *priv)
-{
-	uint32_t in[MLX5_ST_SZ_DW(query_hca_cap_in)] = {0};
-	uint32_t out[MLX5_ST_SZ_DW(query_hca_cap_out)] = {0};
-	uint32_t in_special[MLX5_ST_SZ_DW(query_special_contexts_in)] = {0};
-	uint32_t out_special[MLX5_ST_SZ_DW(query_special_contexts_out)] = {0};
-	uint8_t dump_mkey_reported = 0;
-
-	MLX5_SET(query_hca_cap_in, in, opcode, MLX5_CMD_OP_QUERY_HCA_CAP);
-	MLX5_SET(query_hca_cap_in, in, op_mod,
-			(MLX5_HCA_CAP_GENERAL << 1) |
-			(MLX5_HCA_CAP_OPMOD_GET_CUR & 0x1));
-	if (mlx5_glue->dv_devx_general_cmd(priv->ctx, in, sizeof(in),
-                                       out, sizeof(out))) {
-	    DRV_LOG(DEBUG, "Failed to Query Current HCA CAP section\n");
-	    return -1;
-	}
-	dump_mkey_reported = MLX5_GET(cmd_hca_cap,
-				      MLX5_ADDR_OF(query_hca_cap_out, out,
-					           capability),
-				      dump_fill_mkey);
-	if (!dump_mkey_reported) {
-	    DRV_LOG(DEBUG, "dump_fill_mkey is not supported\n");
-	    return -1;
-	}
-	/* Query the actual dump key. */
-	MLX5_SET(query_special_contexts_in, in_special, opcode,
-		 MLX5_CMD_OP_QUERY_SPECIAL_CONTEXTS);
-	if (mlx5_glue->dv_devx_general_cmd(priv->ctx, in_special, sizeof(in_special),
-                                       out_special, sizeof(out_special))) {
-	    DRV_LOG(DEBUG, "Failed to Query Special Contexts\n");
-		return -1;
-	}
-	priv->caps.dump_mkey = MLX5_GET(query_special_contexts_out,
-					out_special,
-					dump_fill_mkey);
-	/*
-	 * TODO (idos): Take from QUERY HCA CAP Device Emulation Capabilities.
-	 * For now only set protocol features support
-	 */
-	priv->caps.max_num_virtqs = MLX5_VDPA_SW_MAX_VIRTQS_SUPPORTED;
-	/*
-	 * TODO (shahafs): Take from QUERY HCA CAP Device Emulation Capabilities.
-	 * For now only set protocol features support
-	 */
-	priv->caps.notify_stride = MLX5_VDPA_SW_NOTIFY_STRIDE;
-	priv->caps.virtio_net_features = MLX5_VDPA_FEATURES;
-	priv->caps.virtio_protocol_features = MLX5_VDPA_PROTOCOL_FEATURES;
-	DRV_LOG(DEBUG, "Virtio Caps:");
-	DRV_LOG(DEBUG, "	dump_mkey=0x%x ", priv->caps.dump_mkey);
-	DRV_LOG(DEBUG, "	max_num_virtqs=0x%x ", priv->caps.max_num_virtqs);
-	DRV_LOG(DEBUG, "	features_bits=0x%" PRIx64, priv->caps.virtio_net_features);
-	return 0;
-}
-
-#define MLX5_IB_MMAP_CMD_SHIFT 8
-#define MLX5_IB_MMAP_CMD_MASK ((1 << MLX5_IB_MMAP_CMD_SHIFT) - 1)
-#define MLX5_IB_CMD_SIZE 8
-#define MLX5_IB_MMAP_VIRTIO_NOTIFY 9
-static inline int
-mlx5_vdpa_get_notify_offset(uint16_t offset)
-{
-	uint16_t ext_offset = MLX5_IB_MMAP_CMD_SHIFT + MLX5_IB_CMD_SIZE;
-	return (((offset >> MLX5_IB_MMAP_CMD_SHIFT) << ext_offset) |
-		(MLX5_IB_MMAP_VIRTIO_NOTIFY << MLX5_IB_MMAP_CMD_SHIFT) |
-		(offset & MLX5_IB_MMAP_CMD_MASK));
-}
-
-static int
-mlx5_vdpa_report_notify_area(int vid, int qid, uint64_t *offset,
+mlx5_vdpa_report_notify_area(int vid, int qid __rte_unused, uint64_t *offset,
 			     uint64_t *size)
 {
 	int dev_id;
 	struct vdpa_priv_list *list;
-	long page_size = sysconf(_SC_PAGESIZE);
-	uint16_t notify_stride;
 	void * addr;
 
 	dev_id = rte_vhost_get_vdpa_device_id(vid);
@@ -204,13 +203,13 @@ mlx5_vdpa_report_notify_area(int vid, int qid, uint64_t *offset,
 	list = find_priv_resource_by_did(dev_id);
 	if (!list)
 		goto error;
-	notify_stride = list->priv->caps.notify_stride;
-	*offset = 0 | mlx5_vdpa_get_notify_offset(qid * notify_stride);
-	*offset = *offset * page_size;
+	*offset = 0x1000;
+	*offset = *offset * 4096;
 	*size = 0x1000;
 	DRV_LOG(DEBUG, "Notify offset is 0x%" PRIx64 " size is %" PRId64,
 		*offset, *size);
-	addr = mmap(NULL, *size, PROT_READ | PROT_WRITE, MAP_SHARED, list->priv->ctx->cmd_fd, *offset);
+	addr = mmap(NULL, *size, PROT_READ | PROT_WRITE, MAP_SHARED, list->priv->pdev->intr_handle.vfio_dev_fd,
+		    *offset);
 	*((uint32_t *)addr + 1) =0x51;
 	return 0;
 error:
@@ -230,7 +229,7 @@ mlx5_vdpa_get_device_fd(int vid)
 	list = find_priv_resource_by_did(dev_id);
 	if (!list)
 		goto error;
-	return list->priv->ctx->cmd_fd;
+	return list->priv->pdev->intr_handle.vfio_dev_fd;
 error:
 	DRV_LOG(DEBUG, "Invliad vDPA device id %d", vid);
 	return -1;
@@ -250,6 +249,16 @@ static struct rte_vdpa_dev_ops mlx5_vdpa_ops = {
 	.get_notify_area = mlx5_vdpa_report_notify_area,
 };
 
+
+//struct mlx5_vdpa_cmd {
+//	struct mlx5_cmdq_entry	entry;
+//	uint8_t			rsvd0[2048 - sizeof(struct mlx5_cmdq_entry)];
+//	struct mlx5_cmd_block	ibox;
+//	uint8_t			rsvd1[1024 - sizeof(struct mlx5_cmd_block)];
+//	struct mlx5_cmd_block	obox;
+//	uint8_t			rsvd2[1024 - sizeof(struct mlx5_cmd_block)];
+//};
+
 /**
  * DPDK callback to register a PCI device.
  *
@@ -263,61 +272,18 @@ static struct rte_vdpa_dev_ops mlx5_vdpa_ops = {
  * @return
  *   0 on success, a negative errno value otherwise and rte_errno is set.
  */
+#define MLX5_VDPA_READ_16_BE(a)	rte_be_to_cpu_16(rte_read16(a))
+#define MLX5_VDPA_WRITE_32_BE(val, a) rte_write32(rte_cpu_to_be_32(val), a)
+#define MLX5_VDPA_CPU_TO_BE_64(x) rte_cpu_to_be_64(x)
 static int
 mlx5_vdpa_pci_probe(struct rte_pci_driver *pci_drv __rte_unused,
-		    struct rte_pci_device *pci_dev __rte_unused)
+		    struct rte_pci_device *pci_dev)
 {
-	struct ibv_device **ibv_list;
-	struct ibv_device *ibv_match = NULL;
-	struct mlx5dv_context_attr devx_attr = {
-		.flags = MLX5DV_CONTEXT_FLAGS_DEVX,
-		.comp_mask = 0,
-	};
 	struct vdpa_priv *priv = NULL;
 	struct vdpa_priv_list *priv_list_elem = NULL;
-	struct ibv_context *ctx;
-	int ret;
+//	int ret;
 
 	assert(pci_drv == &mlx5_vdpa_driver);
-	errno = 0;
-	ibv_list = mlx5_glue->get_device_list(&ret);
-	if (!ibv_list) {
-		rte_errno = errno ? errno : ENOSYS;
-		DRV_LOG(ERR, "cannot list devices, is ib_uverbs loaded?");
-		return -rte_errno;
-	}
-
-
-	while (ret-- > 0) {
-		struct rte_pci_addr pci_addr;
-
-		DRV_LOG(DEBUG, "checking device \"%s\"", ibv_list[ret]->name);
-		if (mlx5_ibv_device_to_pci_addr(ibv_list[ret], &pci_addr))
-			continue;
-		if (pci_dev->addr.domain != pci_addr.domain ||
-		    pci_dev->addr.bus != pci_addr.bus ||
-		    pci_dev->addr.devid != pci_addr.devid ||
-		    pci_dev->addr.function != pci_addr.function)
-			continue;
-		DRV_LOG(INFO, "PCI information matches for device \"%s\"",
-			ibv_list[ret]->name);
-		ibv_match = ibv_list[ret];
-		break;
-	}
-	if (!ibv_match) {
-		DRV_LOG(DEBUG, "No matching IB device for PCI slot "
-			"%" SCNx32 ":%" SCNx8 ":%" SCNx8 ".%" SCNx8 "\n",
-			pci_dev->addr.domain, pci_dev->addr.bus,
-			pci_dev->addr.devid, pci_dev->addr.function);
-		rte_errno = ENOENT;
-		goto error;
-	}
-	ctx = mlx5_glue->dv_open_device(ibv_match, &devx_attr);
-	if (!ctx) {
-		DRV_LOG(DEBUG, "Failed to open IB device \"%s\"", ibv_match->name);
-		rte_errno = errno ? errno : ENODEV;
-		goto error;
-	}
 	priv = rte_zmalloc("vDPA device private", sizeof(*priv),
 			   RTE_CACHE_LINE_SIZE);
 	priv_list_elem = rte_zmalloc("vDPA device priv list elem",
@@ -328,14 +294,9 @@ mlx5_vdpa_pci_probe(struct rte_pci_driver *pci_drv __rte_unused,
 		rte_errno = rte_errno ? rte_errno : ENOMEM;
 		goto error;
 	}
-	priv->ctx = ctx;
+	priv->pdev = pci_dev;
 	priv->dev_addr.pci_addr = pci_dev->addr;
 	priv->dev_addr.type = PCI_ADDR;
-	if (mlx5_vdpa_query_virtio_caps(priv)) {
-		DRV_LOG(DEBUG, "Unable to query Virtio caps");
-		rte_errno = rte_errno ? rte_errno : EINVAL;
-		goto error;
-	}
 	priv_list_elem->priv = priv;
 	priv->id = rte_vdpa_register_device(&priv->dev_addr,
 					     &mlx5_vdpa_ops);
@@ -347,6 +308,21 @@ mlx5_vdpa_pci_probe(struct rte_pci_driver *pci_drv __rte_unused,
 	pthread_mutex_lock(&priv_list_lock);
 	TAILQ_INSERT_TAIL(&priv_list, priv_list_elem, next);
 	pthread_mutex_unlock(&priv_list_lock);
+
+//	mz = rte_memzone_reserve_aligned("vDPA command buffer", sizeof(*cmd), 0,
+//			RTE_MEMZONE_IOVA_CONTIG, sizeof(*cmd));
+//	memset(mz->addr, 0, sizeof(*cmd));
+//	cmd.entry_type = 0x7;
+//	cmd.entry.iptr = MLX_VDPA_CPU_TO_BE_64(mz->iova + 2048);
+//	cmd.entry.optr = MLX_VDPA_CPU_TO_BE_64(mz->iova + 2048 + 1024);
+//	iseg = (struct mlx5_iseg *)pci_dev->mem_resource[0].addr;
+//	if (MLX5_VDPA_READ_16_BE(iseg->cmdif_rev) != 5)
+//		goto error;
+//	MLX5_VDPA_WRITE_32_BE((uint32_t)(mz->iova >> 32), &iseg->cmdq_pa_h);
+//	MLX5_VDPA_WRITE_32_BE((uint32_t)(mz->iova), &iseg->cmdq_pa_l_sz);
+//	while (MLX5_VDPA_READ_32_BE(&iseg->initializing) >> 31)
+//		;
+//						;
 	return 0;
 
 error:

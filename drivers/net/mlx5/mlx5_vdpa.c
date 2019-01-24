@@ -9,6 +9,12 @@
 #include <unistd.h>
 #include <dlfcn.h>
 #include <sys/mman.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <rte_vfio.h>
+
+
 
 #include "mlx5_glue.h"
 #include "mlx5_defs.h"
@@ -47,6 +53,9 @@ struct vdpa_priv {
 	struct ibv_context *ctx; /* Device context. */
 	struct rte_vdpa_dev_addr dev_addr;
 	struct mlx5_vdpa_caps caps;
+	int vfio_group_fd;
+	int vfio_container_fd;
+	int fd;
 };
 
 struct vdpa_priv_list {
@@ -190,12 +199,79 @@ mlx5_vdpa_get_protocol_features(int did, uint64_t *features)
 //}
 
 static int
+mlx5_vdpa_dma_map(int vid, struct vdpa_priv *internal, int do_map)
+{
+	uint32_t i;
+	int ret;
+	struct rte_vhost_memory *mem = NULL;
+	int vfio_container_fd = internal->vfio_container_fd;
+
+	ret = rte_vhost_get_mem_table(vid, &mem);
+	if (ret < 0) {
+		DRV_LOG(ERR, "failed to get VM memory layout.");
+		goto exit;
+	}
+
+
+	for (i = 0; i < mem->nregions; i++) {
+		struct rte_vhost_mem_region *reg;
+
+		reg = &mem->regions[i];
+		DRV_LOG(INFO, "%s, region %u: HVA 0x%" PRIx64 ", "
+			"GPA 0x%" PRIx64 ", size 0x%" PRIx64 ".",
+			do_map ? "DMA map" : "DMA unmap", i,
+			reg->host_user_addr, reg->guest_phys_addr, reg->size);
+
+		if (do_map) {
+			ret = rte_vfio_container_dma_map(vfio_container_fd,
+				reg->host_user_addr, reg->guest_phys_addr,
+				reg->size);
+			if (ret < 0) {
+				DRV_LOG(ERR, "DMA map failed.");
+				goto exit;
+			}
+		} else {
+			ret = rte_vfio_container_dma_unmap(vfio_container_fd,
+				reg->host_user_addr, reg->guest_phys_addr,
+				reg->size);
+			if (ret < 0) {
+				DRV_LOG(ERR, "DMA unmap failed.");
+				goto exit;
+			}
+		}
+	}
+
+exit:
+	if (mem)
+		free(mem);
+	return ret;
+}
+
+static int
+mlx5_vdpa_dev_config(int vid)
+{
+	int dev_id;
+	struct vdpa_priv_list *list;
+
+	dev_id = rte_vhost_get_vdpa_device_id(vid);
+	if (dev_id < 0)
+		goto error;
+	list = find_priv_resource_by_did(dev_id);
+	if (!list)
+		goto error;
+	mlx5_vdpa_dma_map(vid, list->priv, 1);
+error:
+	return -1;
+}
+
+static int
 mlx5_vdpa_report_notify_area(int vid, int qid __rte_unused, uint64_t *offset,
 			     uint64_t *size)
 {
 	int dev_id;
 	struct vdpa_priv_list *list;
 	void * addr;
+	struct rte_pci_device *pdev;
 
 	dev_id = rte_vhost_get_vdpa_device_id(vid);
 	if (dev_id < 0)
@@ -204,7 +280,11 @@ mlx5_vdpa_report_notify_area(int vid, int qid __rte_unused, uint64_t *offset,
 	if (!list)
 		goto error;
 	*offset = 0x1000;
-	*offset = *offset * 4096;
+	pdev = list->priv->pdev;
+
+	*(uint32_t *)(((uint8_t *)(pdev->mem_resource[0].addr) + 0x1000)) = 0x51;
+//	iseg = (struct mlx5_iseg *)pci_dev->mem_resource[0].addr;
+	*offset = *offset;
 	*size = 0x1000;
 	DRV_LOG(DEBUG, "Notify offset is 0x%" PRIx64 " size is %" PRId64,
 		*offset, *size);
@@ -229,6 +309,7 @@ mlx5_vdpa_get_device_fd(int vid)
 	list = find_priv_resource_by_did(dev_id);
 	if (!list)
 		goto error;
+
 	return list->priv->pdev->intr_handle.vfio_dev_fd;
 error:
 	DRV_LOG(DEBUG, "Invliad vDPA device id %d", vid);
@@ -239,7 +320,7 @@ static struct rte_vdpa_dev_ops mlx5_vdpa_ops = {
 	.get_queue_num = mlx5_vdpa_get_queue_num,
 	.get_features = mlx5_vdpa_get_vdpa_features,
 	.get_protocol_features = mlx5_vdpa_get_protocol_features,
-	.dev_conf = NULL,
+	.dev_conf = mlx5_vdpa_dev_config,
 	.dev_close = NULL,
 	.set_vring_state = NULL,
 	.set_features = NULL,
@@ -281,6 +362,9 @@ mlx5_vdpa_pci_probe(struct rte_pci_driver *pci_drv __rte_unused,
 {
 	struct vdpa_priv *priv = NULL;
 	struct vdpa_priv_list *priv_list_elem = NULL;
+	char devname[RTE_DEV_NAME_MAX_LEN] = {0};
+	int iommu_group_num;
+
 //	int ret;
 
 	assert(pci_drv == &mlx5_vdpa_driver);
@@ -294,6 +378,24 @@ mlx5_vdpa_pci_probe(struct rte_pci_driver *pci_drv __rte_unused,
 		rte_errno = rte_errno ? rte_errno : ENOMEM;
 		goto error;
 	}
+
+	priv->vfio_group_fd = -1;
+	priv->vfio_container_fd = -1;
+
+	rte_pci_device_name(&pci_dev->addr, devname, RTE_DEV_NAME_MAX_LEN);
+	rte_vfio_get_group_num(rte_pci_get_sysfs_path(), devname,
+			&iommu_group_num);
+
+	priv->vfio_container_fd = rte_vfio_container_create();
+	if (priv->vfio_container_fd < 0)
+		return -1;
+
+	priv->vfio_group_fd = rte_vfio_container_group_bind(
+		priv->vfio_container_fd, iommu_group_num);
+	if (priv->vfio_group_fd < 0)
+		goto error;
+	if (rte_pci_map_device(pci_dev))
+		goto error;
 	priv->pdev = pci_dev;
 	priv->dev_addr.pci_addr = pci_dev->addr;
 	priv->dev_addr.type = PCI_ADDR;

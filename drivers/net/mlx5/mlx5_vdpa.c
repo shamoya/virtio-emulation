@@ -115,6 +115,14 @@ struct vdpa_priv {
 	struct mlx5_vdpa_steer_info   rx_steer_info;
 	struct virtq_info virtq[MLX5_VDPA_SW_MAX_VIRTQS_SUPPORTED * 2];
 	SLIST_HEAD(mr_list, mlx5_vdpa_query_mr_list) mr_list;
+	/*
+	 *  Following objects may be temporary (depending on FW decision)
+	 *  They are here mostly for verifying the steering works.
+	 *  Please put non-temporary fields above.
+	 *  TODO(idos): Remove when decision on FW development is taken
+	 */
+	uint32_t                      cqn;
+	struct ibv_cq		      *cq;
 };
 
 struct vdpa_priv_list {
@@ -142,6 +150,28 @@ static int create_pd(struct vdpa_priv *priv)
 	}
 	priv->pdn = MLX5_GET(alloc_pd_out, out, pd);
 	priv->pd_obj = pd;
+	return 0;
+}
+
+static int create_cq(struct vdpa_priv *priv)
+{
+	struct mlx5dv_obj dv_obj = {};
+	struct mlx5dv_cq dv_cq;
+	struct ibv_cq *cq;
+
+	cq = mlx5_glue->create_cq(priv->ctx, 1, NULL, NULL, 0);
+	if (!cq) {
+		DRV_LOG(ERR, "ibv_cq creation failed");
+		return -1;
+	}
+	dv_obj.cq.in = cq;
+	dv_obj.cq.out = &dv_cq;
+	if (mlx5_glue->dv_init_obj(&dv_obj,MLX5DV_OBJ_CQ)) {
+		DRV_LOG(ERR, "DV init_obj for CQ failed");
+		return -1;
+	}
+	priv->cqn = dv_cq.cqn;
+	priv->cq = cq;
 	return 0;
 }
 
@@ -307,6 +337,10 @@ static int mlx5_vdpa_setup_virtqs(struct vdpa_priv *priv)
 	nr_vring = rte_vhost_get_vring_num(priv->vid);
 	/* TODO(idos): Remove when have MQ support */
 	assert(nr_vring == 2);
+	if (create_cq(priv)) {
+		DRV_LOG(ERR, "Create CQ failed");
+		return -1;
+	}
 	for (i = 0; i < nr_vring; i++) {
 		rte_vhost_get_vhost_vring(priv->vid, i, &vq);
 		if (is_virtq_recvq(i, nr_vring)) {
@@ -334,6 +368,16 @@ static int mlx5_vdpa_release_virtqs(struct vdpa_priv *priv)
 	struct mlx5dv_devx_obj *rq;
 	int i;
 
+	if (mlx5_vdpa_release_rx_steer(priv)) {
+		DRV_LOG(ERR, "Error Releasing RX steering resources");
+		return -1;
+	}
+	if (mlx5_glue->destroy_cq(priv->cq)) {
+		DRV_LOG(ERR, "Error destroying CQ");
+		return -1;
+	}
+	priv->cqn = 0;
+	priv->cq = NULL;
 	for (i = 0; i < priv->nr_vring; i++) {
 		if (is_virtq_recvq(i, priv->nr_vring)) {
 			rq = priv->virtq[i].rq_obj;
@@ -347,10 +391,6 @@ static int mlx5_vdpa_release_virtqs(struct vdpa_priv *priv)
 			priv->virtq[i].rqn = 0;
 
 		}
-	}
-	if (mlx5_vdpa_release_rx_steer(priv)) {
-		DRV_LOG(ERR, "Error Releasing RX steering resources");
-		return -1;
 	}
 	return 0;
 }

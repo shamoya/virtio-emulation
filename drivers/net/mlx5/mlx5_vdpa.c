@@ -12,6 +12,7 @@
 #include <rte_bus_pci.h>
 #include <rte_errno.h>
 #include <rte_vdpa.h>
+#include <rte_vfio.h>
 #include <rte_malloc.h>
 #include <rte_common.h>
 
@@ -19,6 +20,7 @@
 #include "mlx5_defs.h"
 #include "mlx5_utils.h"
 #include "mlx5.h"
+#include "mdev_lib.h"
 #include "mlx5_prm.h"
 #include "mlx5_flow.h"
 
@@ -135,12 +137,18 @@ struct mlx5_vdpa_query_mr_list {
 struct vdpa_priv {
 	int                           id; /* vDPA device id. */
 	int                           vid; /* virtio_net driver id */
+	int                           vfio_container_fd;
+	int                           vfio_group_fd;
+	int                           vfio_dev_fd;
 	struct mlx5_vdpa_devx_obj     pd;
 	struct mlx5_vdpa_devx_obj     tis;
 	uint32_t                      gpa_mkey_index;
 	uint16_t                      nr_vring;
 	rte_atomic32_t                dev_attached;
 	struct ibv_context            *ctx; /* Device context. */
+	struct rte_pci_device         *pdev;
+	void			      *base_addr;
+	struct mlx5_mdev_context      *mctx;
 	struct rte_vdpa_dev_addr      dev_addr;
 	struct mlx5_vdpa_caps         caps;
 	struct mlx5_vdpa_relay_thread relay;
@@ -158,6 +166,32 @@ TAILQ_HEAD(vdpa_priv_list_head, priv_list);
 static struct vdpa_priv_list_head priv_list =
 					TAILQ_HEAD_INITIALIZER(priv_list);
 static pthread_mutex_t priv_list_lock = PTHREAD_MUTEX_INITIALIZER;
+
+static inline struct mlx5_mdev_memzone* mlx5_vdpa_vfio_dma(void *owner,
+							   const char *name,
+							   size_t size,
+							   size_t align)
+{
+	struct vdpa_priv *priv = owner;
+	int mdev_sz = sizeof(struct mlx5_mdev_memzone);
+	struct mlx5_mdev_memzone *mz = rte_zmalloc("mdev", mdev_sz, 64);
+	void *va = rte_zmalloc(name, size, align);
+	/*
+	 * Since VFIO DMA MAP API requires the user to supply the IOVA,
+	 * we'll be using identity mapping (va==iova) since this PMD is
+	 * only application running on the function.
+	 * TODO(idos): Change to global IOVA address space per function
+	 *
+	 */
+	uint64_t iova = (uint64_t)va;
+	rte_vfio_container_dma_map(priv->vfio_container_fd,
+				   (uint64_t)va, iova, size);
+	if(!mz)
+		return mz;
+	mz->addr = va;
+	mz->phys_addr = iova;
+	return mz;
+}
 
 static int create_pd(struct vdpa_priv *priv)
 {
@@ -1153,25 +1187,38 @@ mlx5_vdpa_query_virtio_caps(struct vdpa_priv *priv)
 {
 	uint32_t in[MLX5_ST_SZ_DW(query_hca_cap_in)] = {0};
 	uint32_t out[MLX5_ST_SZ_DW(query_hca_cap_out)] = {0};
+	uint32_t in_special[MLX5_ST_SZ_DW(query_special_contexts_in)] = {0};
+	uint32_t out_special[MLX5_ST_SZ_DW(query_special_contexts_out)] = {0};
+	uint8_t dump_mkey_reported = 0;
 	void *cap = NULL;
-	struct mlx5dv_context dev_attr;
 
-	mlx5_glue->dv_query_device(priv->ctx, &dev_attr);
-	if (dev_attr.dump_fill_mkey == MLX5_INVALID_LKEY) {
-		DRV_LOG(DEBUG, "Failed to Query dump mkey from device");
-		return -1;
-	}
-	priv->caps.dump_mkey = dev_attr.dump_fill_mkey;
 	MLX5_SET(query_hca_cap_in, in, opcode, MLX5_CMD_OP_QUERY_HCA_CAP);
 	MLX5_SET(query_hca_cap_in, in, op_mod,
 			(MLX5_HCA_CAP_GENERAL << 1) |
 			(MLX5_HCA_CAP_OPMOD_GET_CUR & 0x1));
-	if (mlx5_glue->dv_devx_general_cmd(priv->ctx, in, sizeof(in),
-					   out, sizeof(out))) {
+
+	if (mlx5_mdev_cmd_exec(priv->mctx, in, sizeof(in), out, sizeof(out))) {
 		DRV_LOG(DEBUG, "Failed to Query Current HCA CAP section");
 		return -1;
 	}
 	cap = MLX5_ADDR_OF(query_hca_cap_out, out, capability);
+	dump_mkey_reported = MLX5_GET(cmd_hca_cap, cap, dump_fill_mkey);
+	if (!dump_mkey_reported) {
+		DRV_LOG(DEBUG, "dump_fill_mkey is not supported");
+		return -1;
+	}
+	/* Query the actual dump key. */
+	MLX5_SET(query_special_contexts_in, in_special, opcode,
+		 MLX5_CMD_OP_QUERY_SPECIAL_CONTEXTS);
+	if (mlx5_mdev_cmd_exec(priv->mctx, in_special,
+			       sizeof(in_special), out_special,
+			       sizeof(out_special))) {
+		DRV_LOG(DEBUG, "Failed to Query Special Contexts");
+		return -1;
+	}
+	priv->caps.dump_mkey = MLX5_GET(query_special_contexts_out,
+					out_special,
+					dump_fill_mkey);
 	/*
 	 * TODO (idos): Once we have FW support, exit if not supported
 	 */
@@ -1181,8 +1228,8 @@ mlx5_vdpa_query_virtio_caps(struct vdpa_priv *priv)
 		MLX5_SET(query_hca_cap_in, in, op_mod,
 			 (MLX5_HCA_CAP_DEVICE_EMULATION << 1) |
 			 (MLX5_HCA_CAP_OPMOD_GET_CUR & 0x1));
-		if (mlx5_glue->dv_devx_general_cmd(priv->ctx, in, sizeof(in),
-						   out, sizeof(out))) {
+		if (mlx5_mdev_cmd_exec(priv->mctx, in, sizeof(in), out,
+				       sizeof(out))) {
 			DRV_LOG(DEBUG, "Failed to Query Emulation CAP section");
 			return -1;
 		}
@@ -1222,6 +1269,48 @@ error:
 	return -1;
 }
 
+static int mlx5_vdpa_vfio_setup(struct vdpa_priv *priv)
+{
+	struct rte_pci_device *dev = priv->pdev;
+	char devname[RTE_DEV_NAME_MAX_LEN] = {0};
+	int iommu_group_num;
+
+	priv->vfio_dev_fd = -1;
+	priv->vfio_group_fd = -1;
+	priv->vfio_container_fd = -1;
+	rte_pci_device_name(&dev->addr, devname, RTE_DEV_NAME_MAX_LEN);
+	rte_vfio_get_group_num(rte_pci_get_sysfs_path(), devname,
+			       &iommu_group_num);
+	priv->vfio_container_fd = rte_vfio_container_create();
+	if (priv->vfio_container_fd < 0)
+		return -1;
+	priv->vfio_group_fd = rte_vfio_container_group_bind(
+			priv->vfio_container_fd, iommu_group_num);
+	if (priv->vfio_group_fd < 0)
+		goto err;
+	if (rte_pci_map_device(dev))
+		goto err;
+	priv->vfio_dev_fd = dev->intr_handle.vfio_dev_fd;
+	return 0;
+err:
+	rte_vfio_container_destroy(priv->vfio_container_fd);
+	return -1;
+}
+
+static int mlx5_vdpa_init_device(struct vdpa_priv *priv)
+{
+	struct rte_pci_device *pdev = priv->pdev;
+	const char *drv_ver = "linux,mlx5_vdpa_vfio,1.0.000001";
+
+	priv->base_addr = (void*)pdev->mem_resource[0].addr;
+	priv->mctx = mdev_open_device((void*)priv, priv->base_addr,
+				      drv_ver, mlx5_vdpa_vfio_dma);
+	if (!priv->mctx)
+		return -1;
+
+	return 0;
+}
+
 static struct rte_vdpa_dev_ops mlx5_vdpa_ops = {
 	.get_queue_num = mlx5_vdpa_get_queue_num,
 	.get_features = mlx5_vdpa_get_vdpa_features,
@@ -1251,59 +1340,11 @@ static struct rte_vdpa_dev_ops mlx5_vdpa_ops = {
  */
 static int
 mlx5_vdpa_pci_probe(struct rte_pci_driver *pci_drv __rte_unused,
-		    struct rte_pci_device *pci_dev __rte_unused)
+		    struct rte_pci_device *pci_dev)
 {
-	struct ibv_device **ibv_list;
-	struct ibv_device *ibv_match = NULL;
-	struct mlx5dv_context_attr devx_attr = {
-		.flags = MLX5DV_CONTEXT_FLAGS_DEVX,
-		.comp_mask = 0,
-	};
 	struct vdpa_priv *priv = NULL;
 	struct vdpa_priv_list *priv_list_elem = NULL;
-	struct ibv_context *ctx;
-	int ret;
 
-	errno = 0;
-	ibv_list = mlx5_glue->get_device_list(&ret);
-	if (!ibv_list) {
-		rte_errno = errno ? errno : ENOSYS;
-		DRV_LOG(ERR, "cannot list devices, is ib_uverbs loaded?");
-		return -rte_errno;
-	}
-
-
-	while (ret-- > 0) {
-		struct rte_pci_addr pci_addr;
-
-		DRV_LOG(DEBUG, "checking device \"%s\"", ibv_list[ret]->name);
-		if (mlx5_ibv_device_to_pci_addr(ibv_list[ret], &pci_addr))
-			continue;
-		if (pci_dev->addr.domain != pci_addr.domain ||
-		    pci_dev->addr.bus != pci_addr.bus ||
-		    pci_dev->addr.devid != pci_addr.devid ||
-		    pci_dev->addr.function != pci_addr.function)
-			continue;
-		DRV_LOG(INFO, "PCI information matches for device \"%s\"",
-			ibv_list[ret]->name);
-		ibv_match = ibv_list[ret];
-		break;
-	}
-	if (!ibv_match) {
-		DRV_LOG(DEBUG, "No matching IB device for PCI slot "
-			"%" SCNx32 ":%" SCNx8 ":%" SCNx8 ".%" SCNx8,
-			pci_dev->addr.domain, pci_dev->addr.bus,
-			pci_dev->addr.devid, pci_dev->addr.function);
-		rte_errno = ENOENT;
-		goto error;
-	}
-	ctx = mlx5_glue->dv_open_device(ibv_match, &devx_attr);
-	if (!ctx) {
-		DRV_LOG(DEBUG, "Failed to open IB device \"%s\"",
-			ibv_match->name);
-		rte_errno = errno ? errno : ENODEV;
-		goto error;
-	}
 	priv = rte_zmalloc("vDPA device private", sizeof(*priv),
 			   RTE_CACHE_LINE_SIZE);
 	priv_list_elem = rte_zmalloc("vDPA device priv list elem",
@@ -1314,9 +1355,19 @@ mlx5_vdpa_pci_probe(struct rte_pci_driver *pci_drv __rte_unused,
 		rte_errno = rte_errno ? rte_errno : ENOMEM;
 		goto error;
 	}
-	priv->ctx = ctx;
+	priv->pdev = pci_dev;
 	priv->dev_addr.pci_addr = pci_dev->addr;
 	priv->dev_addr.type = PCI_ADDR;
+	if (mlx5_vdpa_vfio_setup(priv)) {
+		DRV_LOG(DEBUG, "Unable to init VFIO setup");
+		rte_errno = rte_errno ? rte_errno : EINVAL;
+		goto error;
+	}
+	if (mlx5_vdpa_init_device(priv)) {
+		DRV_LOG(DEBUG, "Unable to init vDPA HCA");
+		rte_errno = rte_errno ? rte_errno : EINVAL;
+		goto error;
+	}
 	if (mlx5_vdpa_query_virtio_caps(priv)) {
 		DRV_LOG(DEBUG, "Unable to query Virtio caps");
 		rte_errno = rte_errno ? rte_errno : EINVAL;

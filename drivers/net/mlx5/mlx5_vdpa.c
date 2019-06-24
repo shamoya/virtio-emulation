@@ -16,13 +16,10 @@
 #include <rte_malloc.h>
 #include <rte_common.h>
 
-#include "mlx5_glue.h"
 #include "mlx5_defs.h"
 #include "mlx5_utils.h"
-#include "mlx5.h"
 #include "mdev_lib.h"
 #include "mlx5_prm.h"
-#include "mlx5_flow.h"
 
 /*
  * TODO: check if allready exists on latest upstream and if so remove.
@@ -83,21 +80,15 @@ struct mlx5_vdpa_caps {
 
 struct virtq_info {
 	uint32_t virtq_id;
-	struct mlx5dv_devx_obj *virtq_obj;
-	struct mlx5dv_devx_umem *umem_obj;
+	uint32_t umem_id;
 	void *umem_buf;
 };
 
-struct mlx5_vdpa_devx_obj {
-	struct mlx5dv_devx_obj *obj;
-	uint32_t id;
-};
-
 struct mlx5_vdpa_steer_info {
-	struct mlx5_vdpa_devx_obj tir;
-	struct mlx5_vdpa_devx_obj rqt;
-	struct ibv_flow        *promisc_flow;
-	struct mlx5dv_flow_matcher *matcher;
+	uint32_t tirn;
+	uint32_t rqtn;
+	// struct ibv_flow        *promisc_flow;
+	// struct mlx5dv_flow_matcher *matcher;
 };
 
 struct mlx5_vdpa_relay_thread {
@@ -124,8 +115,8 @@ struct mlx5_klm {
 struct mlx5_vdpa_query_mr {
 	void			*addr;
 	uint64_t		length;
-	struct mlx5dv_devx_umem *umem;
-	struct mlx5_vdpa_devx_obj *mkey;
+	uint32_t                umem_id;
+	uint32_t                mkey_ix;
 	int			is_indirect;
 };
 
@@ -140,12 +131,11 @@ struct vdpa_priv {
 	int                           vfio_container_fd;
 	int                           vfio_group_fd;
 	int                           vfio_dev_fd;
-	struct mlx5_vdpa_devx_obj     pd;
-	struct mlx5_vdpa_devx_obj     tis;
+	uint32_t                      pdn;
+	uint32_t                      tisn;
 	uint32_t                      gpa_mkey_index;
 	uint16_t                      nr_vring;
 	rte_atomic32_t                dev_attached;
-	struct ibv_context            *ctx; /* Device context. */
 	struct rte_pci_device         *pdev;
 	void			      *base_addr;
 	struct mlx5_mdev_context      *mctx;
@@ -197,16 +187,16 @@ static int create_pd(struct vdpa_priv *priv)
 {
 	uint32_t in[MLX5_ST_SZ_DW(alloc_pd_in)] = {0};
 	uint32_t out[MLX5_ST_SZ_DW(alloc_pd_out)] = {0};
+	int err;
 
 	MLX5_SET(alloc_pd_in, in, opcode, MLX5_CMD_OP_ALLOC_PD);
-	priv->pd.obj = mlx5_glue->dv_devx_obj_create(priv->ctx, in, sizeof(in),
-					   out, sizeof(out));
-	if (!priv->pd.obj) {
+	err = mlx5_mdev_cmd_exec(priv->ctx, in, sizeof(in), out, sizeof(out));
+	if (err || MLX5_GET(alloc_pd_out, out, status)) {
 		DRV_LOG(ERR, "PD allocation failure");
 		return -1;
 	}
-	priv->pd.id = MLX5_GET(alloc_pd_out, out, pd);
-	DRV_LOG(DEBUG, "Success creating PD 0x%x", priv->pd.id);
+	priv->pdn = MLX5_GET(alloc_pd_out, out, pd);
+	DRV_LOG(DEBUG, "Success creating PD 0x%x", priv->pdn);
 	return 0;
 }
 
@@ -232,8 +222,8 @@ static int create_rqt(struct vdpa_priv *priv)
 		    (MLX5_VDPA_SW_MAX_VIRTQS_SUPPORTED *
 		     MLX5_ST_SZ_DW(rq_num))] = {0};
 	uint32_t out[MLX5_ST_SZ_DW(create_rqt_out)] = {0};
-	struct mlx5dv_devx_obj *rqt_obj = NULL;
 	void *rqtc = NULL;
+	int err;
 	int i;
 	int j = 0;
 
@@ -249,16 +239,13 @@ static int create_rqt(struct vdpa_priv *priv)
 		}
 	}
 	MLX5_SET(rqtc, rqtc, rqt_actual_size, j);
-	rqt_obj = mlx5_glue->dv_devx_obj_create(priv->ctx, in, sizeof(in),
-						out, sizeof(out));
-	if (!rqt_obj) {
+	err = mlx5_mdev_cmd_exec(priv->mctx, in, sizeof(in), out, sizeof(out));
+	if (err || MLX5_GET(create_rqt_out, out, status)) {
 		DRV_LOG(DEBUG, "Failed to create RQT");
 		return -1;
 	}
-	priv->rx_steer_info.rqt.id = MLX5_GET(create_tir_out, out, tirn);
-	priv->rx_steer_info.rqt.obj = rqt_obj;
-	DRV_LOG(DEBUG, "Success creating RQT 0x%x",
-		priv->rx_steer_info.rqt.id);
+	priv->rx_steer_info.rqtn = MLX5_GET(create_rqt_out, out, rqtn);
+	DRV_LOG(DEBUG, "Success creating RQT 0x%x", priv->rx_steer_info.rqtn);
 	return 0;
 }
 
@@ -271,16 +258,16 @@ static int create_tir(struct vdpa_priv *priv)
 {
 	uint32_t in[MLX5_ST_SZ_DW(create_tir_in)] = {0};
 	uint32_t out[MLX5_ST_SZ_DW(create_tir_out)] = {0};
-	struct mlx5dv_devx_obj *tir_obj = NULL;
 	void *rss_key = NULL;
 	void *tirc = NULL;
 	void *hfso = NULL;
 	size_t len;
+	int err;
 
 	MLX5_SET(create_tir_in, in, opcode, MLX5_CMD_OP_CREATE_TIR);
 	tirc = MLX5_ADDR_OF(create_tir_in, in, ctx);
 	MLX5_SET(tirc, tirc, disp_type, MLX5_TIRC_DISP_TYPE_INDIRECT);
-	MLX5_SET(tirc, tirc, indirect_table, priv->rx_steer_info.rqt.id);
+	MLX5_SET(tirc, tirc, indirect_table, priv->rx_steer_info.rqtn);
 	MLX5_SET(tirc, tirc, rx_hash_fn, MLX5_RX_HASH_FN_TOEPLITZ);
 	rss_key = MLX5_ADDR_OF(tirc, tirc, rx_hash_toeplitz_key);
 	len = MLX5_FLD_SZ_BYTES(tirc, rx_hash_toeplitz_key);
@@ -290,15 +277,13 @@ static int create_tir(struct vdpa_priv *priv)
 	MLX5_SET(rx_hash_field_select, hfso, l3_prot_type, MLX5_L3_PROT_TYPE_IPV4);
 	MLX5_SET(rx_hash_field_select, hfso, l4_prot_type, MLX5_L4_PROT_TYPE_UDP);
 	MLX5_SET(rx_hash_field_select, hfso, selected_fields, MLX5_HASH_IP_L4PORTS);
-	tir_obj = mlx5_glue->dv_devx_obj_create(priv->ctx, in, sizeof(in),
-						out, sizeof(out));
-	if (!tir_obj) {
+	err = mlx5_mdev_cmd_exec(priv->mctx, in, sizeof(in), out, sizeof(out));
+	if (err || MLX5_GET(create_tir_out, out, status)) {
 		DRV_LOG(DEBUG, "Failed to create TIR");
 		return -1;
 	}
-	priv->rx_steer_info.tir.id = MLX5_GET(create_tir_out, out, tirn);
-	priv->rx_steer_info.tir.obj = tir_obj;
-	DRV_LOG(DEBUG, "Success creating TIR 0x%x", priv->rx_steer_info.tir.id);
+	priv->rx_steer_info.tirn = MLX5_GET(create_tir_out, out, tirn);
+	DRV_LOG(DEBUG, "Success creating TIR 0x%x", priv->rx_steer_info.tirn);
 	return 0;
 }
 

@@ -16,13 +16,10 @@
 #include <rte_malloc.h>
 #include <rte_common.h>
 
-#include "mlx5_glue.h"
 #include "mlx5_defs.h"
 #include "mlx5_utils.h"
-#include "mlx5.h"
 #include "mdev_lib.h"
 #include "mlx5_prm.h"
-#include "mlx5_flow.h"
 
 /*
  * TODO: check if allready exists on latest upstream and if so remove.
@@ -83,21 +80,15 @@ struct mlx5_vdpa_caps {
 
 struct virtq_info {
 	uint32_t virtq_id;
-	struct mlx5dv_devx_obj *virtq_obj;
-	struct mlx5dv_devx_umem *umem_obj;
+	uint32_t umem_id;
 	void *umem_buf;
 };
 
-struct mlx5_vdpa_devx_obj {
-	struct mlx5dv_devx_obj *obj;
-	uint32_t id;
-};
-
 struct mlx5_vdpa_steer_info {
-	struct mlx5_vdpa_devx_obj tir;
-	struct mlx5_vdpa_devx_obj rqt;
-	struct ibv_flow        *promisc_flow;
-	struct mlx5dv_flow_matcher *matcher;
+	uint32_t tirn;
+	uint32_t rqtn;
+	// struct ibv_flow        *promisc_flow;
+	// struct mlx5dv_flow_matcher *matcher;
 };
 
 struct mlx5_vdpa_relay_thread {
@@ -124,8 +115,8 @@ struct mlx5_klm {
 struct mlx5_vdpa_query_mr {
 	void			*addr;
 	uint64_t		length;
-	struct mlx5dv_devx_umem *umem;
-	struct mlx5_vdpa_devx_obj *mkey;
+	uint32_t                umem_id;
+	uint32_t                mkey_ix;
 	int			is_indirect;
 };
 
@@ -140,12 +131,11 @@ struct vdpa_priv {
 	int                           vfio_container_fd;
 	int                           vfio_group_fd;
 	int                           vfio_dev_fd;
-	struct mlx5_vdpa_devx_obj     pd;
-	struct mlx5_vdpa_devx_obj     tis;
+	uint32_t                      pdn;
+	uint32_t                      tisn;
 	uint32_t                      gpa_mkey_index;
 	uint16_t                      nr_vring;
 	rte_atomic32_t                dev_attached;
-	struct ibv_context            *ctx; /* Device context. */
 	struct rte_pci_device         *pdev;
 	void			      *base_addr;
 	struct mlx5_mdev_context      *mctx;
@@ -197,6 +187,7 @@ static int create_pd(struct vdpa_priv *priv)
 {
 	uint32_t in[MLX5_ST_SZ_DW(alloc_pd_in)] = {0};
 	uint32_t out[MLX5_ST_SZ_DW(alloc_pd_out)] = {0};
+	int err;
 
 	MLX5_SET(alloc_pd_in, in, opcode, MLX5_CMD_OP_ALLOC_PD);
 	priv->pd.obj = mlx5_glue->dv_devx_obj_create(priv->ctx, in, sizeof(in),

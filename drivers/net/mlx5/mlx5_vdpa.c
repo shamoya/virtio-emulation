@@ -16,8 +16,6 @@
 #include <rte_malloc.h>
 #include <rte_common.h>
 
-#include "mlx5_defs.h"
-#include "mlx5_utils.h"
 #include "mdev_lib.h"
 #include "mlx5_prm.h"
 
@@ -87,8 +85,8 @@ struct virtq_info {
 struct mlx5_vdpa_steer_info {
 	uint32_t tirn;
 	uint32_t rqtn;
-	// struct ibv_flow        *promisc_flow;
-	// struct mlx5dv_flow_matcher *matcher;
+	uint32_t ftn;
+	uint32_t fgn;
 };
 
 struct mlx5_vdpa_relay_thread {
@@ -190,7 +188,7 @@ static int create_pd(struct vdpa_priv *priv)
 	int err;
 
 	MLX5_SET(alloc_pd_in, in, opcode, MLX5_CMD_OP_ALLOC_PD);
-	err = mlx5_mdev_cmd_exec(priv->ctx, in, sizeof(in), out, sizeof(out));
+	err = mlx5_mdev_cmd_exec(priv->mctx, in, sizeof(in), out, sizeof(out));
 	if (err || MLX5_GET(alloc_pd_out, out, status)) {
 		DRV_LOG(ERR, "PD allocation failure");
 		return -1;
@@ -287,40 +285,111 @@ static int create_tir(struct vdpa_priv *priv)
 	return 0;
 }
 
-static int mlx5_vdpa_enable_promisc(struct vdpa_priv *priv)
+static int mlx5_vdpa_create_flow_table(struct vdpa_priv *priv)
 {
-	struct ibv_flow *promisc_flow = NULL;
-	struct mlx5dv_flow_matcher *matcher = NULL;
-	struct mlx5_flow_dv_match_params empty_val = {
-		.size = sizeof(empty_val.buf),
-	};
-	struct mlx5dv_flow_matcher_attr dv_attr = {
-		.type = IBV_FLOW_ATTR_NORMAL,
-		.match_mask = (void *)&empty_val,
-	};
-	struct mlx5dv_flow_action_attr action_attr = {
-		.type = MLX5DV_FLOW_ACTION_DEST_DEVX,
-		.obj = priv->rx_steer_info.tir.obj,
-	};
-	matcher = mlx5_glue->dv_create_flow_matcher(priv->ctx, &dv_attr);
-	if (!matcher) {
-		DRV_LOG(ERR, "Error creating the dv flow matcher");
+	uint32_t in[MLX5_ST_SZ_DW(create_flow_table_in)]   = {0};
+	uint32_t out[MLX5_ST_SZ_DW(create_flow_table_out)] = {0};
+	int err;
+
+	MLX5_SET(create_flow_table_in, in, opcode,
+		 MLX5_CMD_OP_CREATE_FLOW_TABLE);
+	MLX5_SET(create_flow_table_in, in, table_type,
+		 MLX5_FLOW_TABLE_TYPE_NIC_RX);
+	err = mlx5_mdev_cmd_exec(priv->mctx, in, sizeof(in), out, sizeof(out));
+	if (err || MLX5_GET(create_flow_table_in, out, status)) {
+		DRV_LOG(DEBUG, "Failed to create FLOW Table");
 		return -1;
 	}
-	promisc_flow = mlx5_glue->dv_create_flow(matcher,
-						 (void *)&empty_val, 1,
-						 &action_attr);
-	if (!promisc_flow) {
-		DRV_LOG(ERR, "Error creating the dv promiscuous flow");
-		goto exit;
+	priv->rx_steer_info.ftn = MLX5_GET(create_flow_table_out, out, table_id);
+	return 0;
+}
+
+static int mlx5_vdpa_create_flow_group(struct vdpa_priv *priv)
+{
+	uint32_t in[MLX5_ST_SZ_DW(create_flow_group_in)] = {0};
+	uint32_t out[MLX5_ST_SZ_DW(create_flow_group_out)] = {0};
+	int err;
+
+	MLX5_SET(create_flow_group_in, in, opcode,
+		 MLX5_CMD_OP_CREATE_FLOW_GROUP);
+	MLX5_SET(create_flow_group_in, in, table_id, priv->rx_steer_info.ftn);
+	MLX5_SET(create_flow_group_in, in, table_type,
+		 MLX5_FLOW_TABLE_TYPE_NIC_RX);
+	err = mlx5_mdev_cmd_exec(priv->mctx, in, sizeof(in), out, sizeof(out));
+	if (err || MLX5_GET(create_flow_group_out, out, status)) {
+		DRV_LOG(DEBUG, "Failed to create FLOW Table");
+		return -1;
 	}
-	priv->rx_steer_info.matcher = matcher;
-	priv->rx_steer_info.promisc_flow = promisc_flow;
+	priv->rx_steer_info.fgn = MLX5_GET(create_flow_group_out, out,
+					   group_id);
+	return 0;
+}
+
+static int mlx5_vdpa_set_promisc_fte(struct vdpa_priv *priv)
+{
+	uint32_t in[MLX5_ST_SZ_DW(set_fte_in) +
+		    sizeof(struct mlx5_ifc_basic_dest_counter_list_bits)] = {0};
+	uint32_t out[MLX5_ST_SZ_DW(set_fte_out)] = {0};
+	void *flowc;
+	void *dst;
+	int err;
+
+	MLX5_SET(set_fte_in, in, opcode, MLX5_CMD_OP_SET_FLOW_TABLE_ENTRY);
+	MLX5_SET(set_fte_in, in, table_id, priv->rx_steer_info.ftn);
+	MLX5_SET(set_fte_in, in, table_type, MLX5_FLOW_TABLE_TYPE_NIC_RX);
+	flowc = MLX5_ADDR_OF(set_fte_in, in, flowc);
+	MLX5_SET(flow_context, flowc, group_id, priv->rx_steer_info.fgn);
+	MLX5_SET(flow_context, flowc, flow_tag, 0x1);
+	MLX5_SET(flow_context, flowc, action,
+		 MLX5_FLOW_CONTEXT_ACTION_FWD_DEST);
+	MLX5_SET(flow_context, flowc, destination_list_size, 1);
+	dst = MLX5_ADDR_OF(flow_context, flowc, destination);
+	MLX5_SET(dest_format_struct, dst, destination_type,
+		 MLX5_FLOW_DESTINATION_TYPE_TIR);
+	MLX5_SET(dest_format_struct, dst, destination_id,
+		 priv->rx_steer_info.tirn);
+	err = mlx5_mdev_cmd_exec(priv->mctx, in, sizeof(in), out, sizeof(out));
+	if (err || MLX5_GET(set_fte_out, out, status)) {
+		DRV_LOG(DEBUG, "Failed to create FLOW Table");
+		return -1;
+	}
+	return 0;
+}
+
+static int mlx5_vdpa_set_flow_table_root(struct vdpa_priv *priv)
+{
+	uint32_t in[MLX5_ST_SZ_DW(set_flow_table_root_in)] = {0};
+	uint32_t out[MLX5_ST_SZ_DW(set_flow_table_root_out)] = {0};
+	int err;
+
+	MLX5_SET(set_flow_table_root_in, in, opcode,
+		 MLX5_CMD_OP_SET_FLOW_TABLE_ROOT);
+	MLX5_SET(set_flow_table_root_in, in, table_type,
+		 MLX5_FLOW_TABLE_TYPE_NIC_RX);
+	MLX5_SET(set_flow_table_root_in, in, table_id,
+		 priv->rx_steer_info.ftn);
+	err = mlx5_mdev_cmd_exec(priv->mctx, in, sizeof(in), out, sizeof(out));
+	if (err || MLX5_GET(set_flow_table_root_out, out, status)) {
+		DRV_LOG(DEBUG, "Failed to create FLOW Table");
+		return -1;
+	}
+	return 0;
+}
+
+static int mlx5_vdpa_enable_promisc(struct vdpa_priv *priv)
+{
+	if (mlx5_vdpa_create_flow_table(priv))
+		goto ft_err;
+	if (mlx5_vdpa_create_flow_group(priv))
+		goto ft_err;
+	if (mlx5_vdpa_set_promisc_fte(priv))
+		goto ft_err;
+	if (mlx5_vdpa_set_flow_table_root(priv))
+		goto ft_err;
 	DRV_LOG(DEBUG, "Success creating Promiscuous flow rule");
 	return 0;
-exit:
-	if (mlx5_glue->dv_destroy_flow_matcher(matcher))
-		DRV_LOG(INFO, "Error destroying the matcher");
+ft_err:
+	DRV_LOG(DEBUG, "Failure in creating Promiscuous steering");
 	return -1;
 }
 
@@ -348,6 +417,44 @@ exit:
 	return gpa;
 }
 
+static int
+mlx5_vdpa_create_umem(struct vdpa_priv *priv, int umem_size, uint64_t iova,
+		      uint32_t *umem_id)
+{
+	uint8_t in[MLX5_ST_SZ_DB(create_umem_in) +
+		   sizeof(struct mlx5_ifc_mtt_entry_bits)] = {0};
+	uint32_t out[MLX5_ST_SZ_DW(create_umem_out)] = {0};
+	void *umemc;
+	void *mtt;
+	int err;
+
+	MLX5_SET(create_umem_in, in, opcode, MLX5_CMD_OP_CREATE_UMEM);
+	umemc = MLX5_ADDR_OF(create_umem_in, in, umem_context);
+	/*
+	 * Important: This function assumes the buffer represented by
+	 * iova and umem_size is contiguous (in IOVA space), a valid
+	 * natural page size (e.g natural power of 2 number, greater
+	 * than 4KB) and naturally aligned.
+	 *
+	 * */
+	MLX5_SET(umemc, umemc, log_page_size, (rte_log2_u32(umem_size) >> 12));
+	MLX5_SET(umemc, umemc, num_of_mtt, 1);
+	MLX5_SET(umemc, umemc, page_offset, 0);
+	mtt = MLX5_ADDR_OF(umemc, umemc, mtt);
+	MLX5_SET(mtt_entry, mtt, ptag, iova);
+	MLX5_SET(mtt_entry, mtt, wr_en, 1);
+	MLX5_SET(mtt_entry, mtt, rd_en, 1);
+
+	err = mlx5_mdev_cmd_exec(priv->mctx, in, sizeof(in), out, sizeof(out));
+	if (err || MLX5_GET(create_umem_out, out, status)) {
+		DRV_LOG(DEBUG, "Failed to create UMEM");
+		return -1;
+	}
+
+	*umem_id = MLX5_GET(create_umem_out, out, umem_id);
+	return 0;
+}
+
 #define MLX5_VDPA_VIRTIO_NET_Q_UMEM_SIZE (128 * 1024)
 
 static int
@@ -357,25 +464,25 @@ create_split_virtq(struct vdpa_priv *priv, int index,
 	uint32_t in[MLX5_ST_SZ_DW(create_virtq_in)] = {0};
 	uint32_t out[MLX5_ST_SZ_DW(general_obj_out_cmd_hdr)] = {0};
 	struct mlx5dv_devx_obj *virtq_obj = NULL;
+	struct mlx5_mdev_memzone *umem_mz = NULL;
 	void *virtq = NULL;
 	void *hdr = NULL;
 	struct virtq_info *info = &priv->virtq[index];
 	uint64_t gpa;
 	int umem_size;
+	int err;
 
 	/* Setup UMEM for this virt queue. */
 	umem_size = MLX5_VDPA_VIRTIO_NET_Q_UMEM_SIZE;
-	info->umem_buf = rte_malloc(__func__, umem_size, 4096);
-	if (!info->umem_buf) {
+	umem_mz = mlx5_vdpa_vfio_dma(priv, "virtq_umem", umem_size, umem_size);
+	if (!umem_mz) {
 		DRV_LOG(ERR, "Error allocating memory for Virt queue");
-		goto error;
+		return -1;
 	}
-	info->umem_obj = mlx5_glue->dv_devx_umem_reg(priv->ctx, info->umem_buf,
-						     umem_size,
-						     IBV_ACCESS_LOCAL_WRITE);
-	if (!info->umem_obj) {
-		DRV_LOG(ERR, "Error registering UMEM for Virt queue");
-		goto error;
+	if (mlx5_vdpa_create_umem(priv, umem_size, umem_mz->phys_addr,
+				 &info->umem_id)) {
+		DRV_LOG(ERR, "Error creating UMEM for Virt queue");
+		return -1;
 	}
 	/* Fill command mailbox. */
 	hdr = MLX5_ADDR_OF(create_virtq_in, in, hdr);
@@ -417,27 +524,17 @@ create_split_virtq(struct vdpa_priv *priv, int index,
 	 * ctrl_mkey field to it.
 	 */
 	MLX5_SET(virtq, virtq, ctrl_mkey, priv->gpa_mkey_index);
-	MLX5_SET(virtq, virtq, umem_id, info->umem_obj->umem_id);
-	MLX5_SET(virtq, virtq, tisn, priv->tis.id);
+	MLX5_SET(virtq, virtq, umem_id, info->umem_id);
+	MLX5_SET(virtq, virtq, tisn, priv->tisn);
 	MLX5_SET(virtq, virtq, doorbell_stride_idx, index);
-	virtq_obj = mlx5_glue->dv_devx_obj_create(priv->ctx, in, sizeof(in),
-						  out, sizeof(out));
-	if (!virtq_obj) {
+	err = mlx5_mdev_cmd_exec(priv->ctx, in, sizeof(in), out, sizeof(out));
+	if (err || MLX5_GET(general_obj_out_cmd_hdr, out, status)) {
 		DRV_LOG(DEBUG, "Failed to create VIRTQ General Obj DEVX");
 		return -1;
 	}
-	priv->virtq[index].virtq_id = MLX5_GET(general_obj_out_cmd_hdr, out,
-					       obj_id);
-	priv->virtq[index].virtq_obj = virtq_obj;
-	DRV_LOG(DEBUG, "Success creating VIRTQ 0x%x",
-		priv->virtq[index].virtq_id);
+	info->virtq_id = MLX5_GET(general_obj_out_cmd_hdr, out, obj_id);
+	DRV_LOG(DEBUG, "Success creating VIRTQ 0x%x", info->virtq_id);
 	return 0;
-error:
-	if (info->umem_obj)
-		mlx5_glue->dv_devx_umem_dereg(info->umem_obj);
-	if (info->umem_buf)
-		rte_free(info->umem_buf);
-	return -1;
 }
 
 static int mlx5_vdpa_setup_rx_steering(struct vdpa_priv *priv)
@@ -446,7 +543,6 @@ static int mlx5_vdpa_setup_rx_steering(struct vdpa_priv *priv)
 		DRV_LOG(ERR, "Create Indirection table failed");
 		return -1;
 	}
-
 	if (create_tir(priv)) {
 		DRV_LOG(ERR, "Create TIR failed");
 		return -1;
@@ -455,42 +551,6 @@ static int mlx5_vdpa_setup_rx_steering(struct vdpa_priv *priv)
 		DRV_LOG(ERR, "Promiscuous flow rule creation failed");
 		return -1;
 	}
-	return 0;
-}
-
-static int mlx5_vdpa_release_rx_steer(struct vdpa_priv *priv)
-{
-	struct mlx5dv_flow_matcher *matcher;
-	struct mlx5dv_devx_obj *tir;
-	struct mlx5dv_devx_obj *rqt;
-	struct ibv_flow *flow;
-
-	flow = priv->rx_steer_info.promisc_flow;
-	if (flow && mlx5_glue->destroy_flow(flow)) {
-		DRV_LOG(ERR, "Error Destroying Flow");
-		return -1;
-	}
-	priv->rx_steer_info.promisc_flow = NULL;
-	matcher = priv->rx_steer_info.matcher;
-	if (matcher && mlx5_glue->dv_destroy_flow_matcher(matcher)) {
-		DRV_LOG(ERR, "Error Destroying Flow Matcher");
-		return -1;
-	}
-	priv->rx_steer_info.matcher = NULL;
-	tir = priv->rx_steer_info.tir.obj;
-	if (tir && mlx5_glue->dv_devx_obj_destroy(tir)) {
-		DRV_LOG(ERR, "Error Destroying TIR");
-		return -1;
-	}
-	priv->rx_steer_info.tir.obj = NULL;
-	priv->rx_steer_info.tir.id = 0;
-	rqt = priv->rx_steer_info.rqt.obj;
-	if (rqt && mlx5_glue->dv_devx_obj_destroy(rqt)) {
-		DRV_LOG(ERR, "Error Destroying RQT");
-		return -1;
-	}
-	priv->rx_steer_info.rqt.obj = NULL;
-	priv->rx_steer_info.rqt.id = 0;
 	return 0;
 }
 
@@ -517,53 +577,16 @@ static int mlx5_vdpa_setup_virtqs(struct vdpa_priv *priv)
 	return 0;
 }
 
-static int
-destroy_split_virtq(struct vdpa_priv *priv, int index)
-{
-	struct virtq_info *info = &priv->virtq[index];
-
-	if (info->virtq_obj) {
-		mlx5_glue->dv_devx_obj_destroy(info->virtq_obj);
-		info->virtq_obj = NULL;
-		info->virtq_id = 0;
-	}
-	if (info->umem_obj) {
-		mlx5_glue->dv_devx_umem_dereg(info->umem_obj);
-		info->umem_obj = NULL;
-	}
-	if (info->umem_buf) {
-		rte_free(info->umem_buf);
-		info->umem_buf = NULL;
-	}
-	return 0;
-}
-
-
-static int mlx5_vdpa_release_virtqs(struct vdpa_priv *priv)
-{
-	int i;
-
-	if (mlx5_vdpa_release_rx_steer(priv)) {
-		DRV_LOG(ERR, "Error Releasing RX steering resources");
-		return -1;
-	}
-	for (i = 0; i < priv->nr_vring; i++)
-		destroy_split_virtq(priv, i);
-	return 0;
-}
-
-static struct mlx5_vdpa_devx_obj *
-mlx5_vdpa_create_mkey(struct ibv_context *ctx,
-		      struct mlx5_devx_mkey_attr *mkey_attr)
+static uint32_t mlx5_vdpa_create_mkey(struct mlx5_mdev_context *ctx,
+				      struct mlx5_devx_mkey_attr *mkey_attr)
 {
 	uint32_t in[MLX5_ST_SZ_DW(create_mkey_in)] = {0};
 	uint32_t out[MLX5_ST_SZ_DW(create_mkey_out)] = {0};
-	uint32_t status;
+	uint32_t mkey_ix;
 	void *mkc;
-	struct mlx5_vdpa_devx_obj *mkey = NULL;
 	int translations_oct_size = ((((mkey_attr->size + 4095) / 4096) + 1) / 2);
+	int err;
 
-	mkey = rte_zmalloc("mkey", sizeof(*mkey), RTE_CACHE_LINE_SIZE);
 	MLX5_SET(create_mkey_in, in, opcode, MLX5_CMD_OP_CREATE_MKEY);
 	mkc = MLX5_ADDR_OF(create_mkey_in, in, memory_key_mkey_entry);
 	MLX5_SET(mkc, mkc, lw, 0x1);
@@ -579,33 +602,25 @@ mlx5_vdpa_create_mkey(struct ibv_context *ctx,
 	MLX5_SET(create_mkey_in, in, translations_octword_actual_size,
 		translations_oct_size);
 	MLX5_SET(create_mkey_in, in, pg_access, 1);
+	MLX5_SET(create_mkey_in, in, mkey_umem_valid, 1);
 	MLX5_SET64(mkc, mkc, start_addr, mkey_attr->addr);
 	MLX5_SET64(mkc, mkc, len, mkey_attr->size);
 	MLX5_SET(mkc, mkc, log_page_size, 12);
 	MLX5_SET(create_mkey_in, in, mkey_umem_id, mkey_attr->pas_id);
 
-	mkey->obj = mlx5_glue->dv_devx_obj_create(ctx, in, sizeof(in), out,
-					   sizeof(out));
-	if (!mkey->obj) {
+	err = mlx5_mdev_cmd_exec(ctx, in, sizeof(in), out, sizeof(out));
+	if (err || MLX5_GET(create_mkey_out, out, status)) {
 		DRV_LOG(ERR, "Can't create mkey error %s", strerror(errno));
-		goto error;
+		return -1;
 	}
-	status = MLX5_GET(create_mkey_out, out, status);
-	mkey->id = MLX5_GET(create_mkey_out, out, mkey_index);
-	mkey->id = (mkey->id << 8) | MKEY_VARIANT_PART;
-	DRV_LOG(DEBUG, "create mkey status %d mkey value %d",
-		status, (mkey->id));
-	if (status)
-		goto error;
-	return mkey;
-error:
-	if (mkey)
-		rte_free(mkey);
-	return NULL;
+	mkey_ix = MLX5_GET(create_mkey_out, out, mkey_index);
+	mkey_ix = (mkey_ix << 8) | MKEY_VARIANT_PART;
+	DRV_LOG(DEBUG, "create mkey success value %d", mkey_ix);
+	return mkey_ix;
 }
 
-static struct mlx5_vdpa_devx_obj *
-mlx5_create_indirect_mkey(struct ibv_context *ctx,
+static uint32_t
+mlx5_create_indirect_mkey(struct mlx5_mdev_context *ctx,
 			  struct mlx5_devx_mkey_attr *mkey_attr,
 			  struct mlx5_klm *klm_array, int num_klm)
 {
@@ -614,12 +629,11 @@ mlx5_create_indirect_mkey(struct ibv_context *ctx,
 				translations_oct_size * MLX5_ST_SZ_DB(klm);
 	uint32_t *in = rte_zmalloc("in", in_size, 64);
 	uint32_t out[MLX5_ST_SZ_DW(create_mkey_out)] = {0};
-	uint32_t status;
+	uint32_t mkey_ix;
 	void *mkc;
-	struct mlx5_vdpa_devx_obj *mkey = NULL;
 	uint8_t *klm = (uint8_t *)MLX5_ADDR_OF(create_mkey_in, in, klm_pas_mtt);
+	int err;
 
-	mkey = rte_zmalloc("mkey", sizeof(*mkey), RTE_CACHE_LINE_SIZE);
 	MLX5_SET(create_mkey_in, in, opcode, MLX5_CMD_OP_CREATE_MKEY);
 	mkc = MLX5_ADDR_OF(create_mkey_in, in, memory_key_mkey_entry);
 	MLX5_SET(mkc, mkc, lw, 0x1);
@@ -648,23 +662,14 @@ mlx5_create_indirect_mkey(struct ibv_context *ctx,
 		MLX5_SET64(klm, klm, address, 0x0);
 		klm += MLX5_ST_SZ_DB(klm);
 	}
-	mkey->obj = mlx5_glue->dv_devx_obj_create(ctx, in, in_size, out,
-						  sizeof(out));
-	if (!mkey->obj) {
+	err = mlx5_mdev_cmd_exec(ctx, in, in_size, out, sizeof(out));
+	if (err || MLX5_GET(create_mkey_out, out, status)) {
 		DRV_LOG(ERR, "Can't create mkey error %s", strerror(errno));
-		goto error;
+		return -1;
 	}
-	status = MLX5_GET(create_mkey_out, out, status);
-	mkey->id = MLX5_GET(create_mkey_out, out, mkey_index);
-	mkey->id = (mkey->id << 8) | MKEY_VARIANT_PART;
-	if (status)
-		return NULL;
-
-	return mkey;
-error:
-	if (mkey)
-		rte_free(mkey);
-	return NULL;
+	mkey_ix = MLX5_GET(create_mkey_out, out, mkey_index);
+	mkey_ix = (mkey_ix << 8) | MKEY_VARIANT_PART;
+	return mkey_ix;
 }
 
 static struct vdpa_priv_list *
@@ -711,59 +716,6 @@ mlx5_vdpa_get_vdpa_features(int did, uint64_t *features)
 		return -1;
 	}
 	*features = list_elem->priv->caps.virtio_net_features;
-	return 0;
-}
-
-#define MLX5_IB_MMAP_CMD_SHIFT 8
-#define MLX5_IB_MMAP_INDEX_MASK ((1 << MLX5_IB_MMAP_CMD_SHIFT) - 1)
-#define MLX5_IB_CMD_SIZE 8
-#define MLX5_IB_MMAP_VIRTIO_NOTIFY 9
-static inline void
-mlx5_vdpa_set_command(int command, uint16_t *offset)
-{
-	*offset |= (command << MLX5_IB_MMAP_CMD_SHIFT);
-}
-
-static inline void
-mlx5_vdpa_set_ext_index(int index, uint16_t *offset)
-{
-	uint16_t shift = MLX5_IB_MMAP_CMD_SHIFT + MLX5_IB_CMD_SIZE;
-
-	*offset |= (((index >> MLX5_IB_MMAP_CMD_SHIFT) << shift) |
-		    (index & MLX5_IB_MMAP_INDEX_MASK));
-}
-
-/*
- * Currently there is a single offset for all of the queues doorbells.
- */
-static inline uint16_t
-mlx5_vdpa_get_notify_offset(int qid __rte_unused)
-{
-	uint16_t offset = 0;
-
-	mlx5_vdpa_set_command(MLX5_IB_MMAP_VIRTIO_NOTIFY, &offset);
-	mlx5_vdpa_set_ext_index(0, &offset);
-	return offset;
-}
-
-static int
-mlx5_vdpa_report_notify_area(int vid __rte_unused, int qid, uint64_t *offset,
-			     uint64_t *size)
-{
-	long page_size = sysconf(_SC_PAGESIZE);
-
-	*offset = mlx5_vdpa_get_notify_offset(qid);
-	*offset = *offset * page_size;
-	/*
-	 * For now size can be only page size. smaller size does not fit
-	 * naturally to the way KVM subscribe translations into the EPT.
-	 *
-	 * This much fit BlueField1 solution. need to evaluate if we can
-	 * bypass this issue in SW to match ConnectX-6 implementation.
-	 */
-	*size = page_size;
-	DRV_LOG(DEBUG, "Notify offset is 0x%" PRIx64 " size is %" PRId64,
-		*offset, *size);
 	return 0;
 }
 
@@ -838,22 +790,10 @@ mlx5_vdpa_notify_relay(void *arg)
 static int
 mlx5_vdpa_setup_notify_relay(struct vdpa_priv *priv)
 {
-	uint64_t offset, size;
 	void *addr;
-	long page_size = sysconf(_SC_PAGESIZE);
 	int ret;
 
-	/* set the base notify addr */
-	if (mlx5_vdpa_report_notify_area(priv->id, 0, &offset, &size) < 0)
-		return -1;
-	/* Always map the entire page. */
-	addr = mmap(NULL, page_size, PROT_READ | PROT_WRITE, MAP_SHARED,
-		    priv->ctx->cmd_fd, offset);
-	if (addr == MAP_FAILED) {
-		DRV_LOG(ERR, "Mapping doorbell page failed. device: %d",
-			priv->id);
-		return -1;
-	}
+	addr = (uint8_t *)(priv->base_addr) + 0x1000;
 	priv->relay.notify_base = addr;
 	/* TODO: enforce the thread affinity. */
 	ret = pthread_create(&priv->relay.tid, NULL, mlx5_vdpa_notify_relay,
@@ -862,37 +802,6 @@ mlx5_vdpa_setup_notify_relay(struct vdpa_priv *priv)
 		DRV_LOG(ERR, "failed to create notify relay pthread.");
 		return -1;
 	}
-	return 0;
-}
-
-static int
-mlx5_vdpa_release_mr(struct vdpa_priv *priv)
-{
-	struct mlx5_vdpa_query_mr_list *entry;
-	struct mlx5_vdpa_query_mr_list *next;
-
-	entry = SLIST_FIRST(&priv->mr_list);
-	while (entry) {
-		next = SLIST_NEXT(entry, next);
-		if (mlx5_glue->
-			dv_devx_obj_destroy(entry->vdpa_query_mr->mkey->obj)) {
-			DRV_LOG(ERR, "Error when destroying Mkey object");
-			return -1;
-		}
-		rte_free(entry->vdpa_query_mr->mkey);
-		if (!entry->vdpa_query_mr->is_indirect) {
-			if (mlx5_glue->
-				dv_devx_umem_dereg(entry->vdpa_query_mr->umem)) {
-				DRV_LOG(ERR, "Error when deregistering Umem");
-				return -1;
-			}
-		}
-		SLIST_REMOVE(&priv->mr_list, entry, mlx5_vdpa_query_mr_list,
-			     next);
-		rte_free(entry->vdpa_query_mr);
-		rte_free(entry);
-		entry = next;
-	};
 	return 0;
 }
 
@@ -912,8 +821,6 @@ mlx5_vdpa_dma_map(struct vdpa_priv *priv)
 	uint64_t min_size = klm_size;
 	uint64_t mem_size;
 
-	if (!SLIST_EMPTY(&priv->mr_list))
-		mlx5_vdpa_release_mr(priv);
 	SLIST_INIT(&priv->mr_list);
 	ret = rte_vhost_get_mem_table(priv->id, &mem);
 	if (ret < 0) {
@@ -944,19 +851,27 @@ mlx5_vdpa_dma_map(struct vdpa_priv *priv)
 			DRV_LOG(ERR, "Unable to allocate memory");
 			goto error;
 		}
-		entry->umem = mlx5_glue->dv_devx_umem_reg(priv->ctx,
-					(void *)reg->host_user_addr, reg->size,
-					 IBV_ACCESS_LOCAL_WRITE);
-		if (!entry->umem) {
-			DRV_LOG(ERR, "Failed to register Umem using Devx.");
+
+		ret = rte_vfio_container_dma_map(priv->vfio_container_fd,
+						 reg->host_user_addr,
+						 reg->guest_phys_addr,
+						 reg->size);
+		if (ret < 0) {
+			DRV_LOG(ERR, "Failed to VFIO DMA Map");
+			goto error;
+		}
+		if (mlx5_vdpa_create_umem(priv, reg->size,
+					  reg->guest_phys_addr,
+					  &entry->umem_id)) {
+			DRV_LOG(ERR, "Failed to create UMEM");
 			goto error;
 		}
 		mkey_attr.addr = (uintptr_t)(reg->guest_phys_addr);
 		mkey_attr.size = reg->size;
-		mkey_attr.pas_id = entry->umem->umem_id;
-		mkey_attr.pd = priv->pd.id;
-		entry->mkey = mlx5_vdpa_create_mkey(priv->ctx, &mkey_attr);
-		if (!entry->mkey) {
+		mkey_attr.pas_id = entry->umem_id;
+		mkey_attr.pd = priv->pdn;
+		entry->mkey_ix = mlx5_vdpa_create_mkey(priv->mctx, &mkey_attr);
+		if (entry->mkey_ix == -1) {
 			DRV_LOG(ERR, "Unable to create Mkey");
 			goto error;
 		}
@@ -983,7 +898,7 @@ mlx5_vdpa_dma_map(struct vdpa_priv *priv)
 		}
 		for (uint64_t k = 0; k < reg->size; k += klm_size) {
 			klm_array[klm_index].byte_count = 0;
-			klm_array[klm_index].mkey = entry->mkey->id;
+			klm_array[klm_index].mkey = entry->mkey_ix;
 			klm_array[klm_index].address = reg->guest_phys_addr + k;
 			klm_index++;
 		}
@@ -992,7 +907,7 @@ mlx5_vdpa_dma_map(struct vdpa_priv *priv)
 	}
 	mkey_attr.addr = (uintptr_t)(mem->regions[0].guest_phys_addr);
 	mkey_attr.size = mem_size;
-	mkey_attr.pd = priv->pd.id;
+	mkey_attr.pd = priv->pdn;
 	mkey_attr.pas_id = 0;
 	mkey_attr.log_entity_size = rte_log2_u32(klm_size);
 	list_elem =
@@ -1002,16 +917,17 @@ mlx5_vdpa_dma_map(struct vdpa_priv *priv)
 		DRV_LOG(ERR, "Unable to allocate memory");
 		goto error;
 	}
-	entry->mkey = mlx5_create_indirect_mkey(priv->ctx,
-				&mkey_attr, klm_array, klm_index);
-	if (!entry->mkey) {
+	entry->mkey_ix = mlx5_create_indirect_mkey(priv->mctx,
+						   &mkey_attr,
+						   klm_array, klm_index);
+	if (entry->mkey_ix == -1) {
 		DRV_LOG(ERR, "Unable to create indirect Mkey");
 		goto error;
 	}
 	entry->is_indirect = 1;
 	list_elem->vdpa_query_mr = entry;
 	SLIST_INSERT_HEAD(&priv->mr_list, list_elem, next);
-	priv->gpa_mkey_index = entry->mkey->id;
+	priv->gpa_mkey_index = entry->mkey_ix;
 	return 0;
 error:
 	if (list_elem)
@@ -1026,16 +942,15 @@ mlx5_vdpa_create_tis(struct vdpa_priv *priv)
 {
 	uint32_t in[MLX5_ST_SZ_DW(create_tis_in)] = {0};
 	uint32_t out[MLX5_ST_SZ_DW(create_tis_out)] = {0};
+	int err;
 
 	MLX5_SET(create_tis_in, in, opcode, MLX5_CMD_OP_CREATE_TIS);
-	priv->tis.obj = mlx5_glue->dv_devx_obj_create(priv->ctx, in, sizeof(in),
-						      out, sizeof(out));
-	if (!priv->tis.obj) {
-		DRV_LOG(ERR, "Can't create TIS error %s",
-			strerror(errno));
+	err = mlx5_mdev_cmd_exec(priv->mctx, in, sizeof(in), out, sizeof(out));
+	if (err || MLX5_GET(create_tis_out, out, status)) {
+		DRV_LOG(ERR, "Can't create TIS");
 		return -1;
 	}
-	priv->tis.id = MLX5_GET(create_tis_out, out, tisn);
+	priv->tisn = MLX5_GET(create_tis_out, out, tisn);
 	return 0;
 }
 
@@ -1072,62 +987,6 @@ mlx5_vdpa_dev_config(int vid)
 	}
 	mlx5_vdpa_setup_notify_relay(priv);
 	rte_atomic32_set(&priv->dev_attached, 1);
-	return 0;
-}
-
-static int
-mlx5_vdpa_unset_notify_relay(struct vdpa_priv *priv)
-{
-	void *status;
-	long page_size = sysconf(_SC_PAGESIZE);
-
-	if (priv->relay.tid) {
-		pthread_cancel(priv->relay.tid);
-		pthread_join(priv->relay.tid, &status);
-	}
-	priv->relay.tid	= 0;
-	if (priv->relay.epfd >= 0)
-		close(priv->relay.epfd);
-	priv->relay.epfd = -1;
-	munmap(priv->relay.notify_base, page_size);
-	priv->relay.notify_base = NULL;
-	return 0;
-}
-
-static int
-mlx5_vdpa_dev_close(int vid)
-{
-	int did;
-	struct vdpa_priv_list *list_elem;
-	struct vdpa_priv *priv;
-
-	did = rte_vhost_get_vdpa_device_id(vid);
-	list_elem = find_priv_resource_by_did(did);
-	if (list_elem == NULL) {
-		DRV_LOG(ERR, "Invalid device id: %d", did);
-		return -1;
-	}
-	priv = list_elem->priv;
-	mlx5_vdpa_unset_notify_relay(priv);
-	if (mlx5_vdpa_release_virtqs(priv)) {
-		DRV_LOG(ERR, "Error in releasing Virtqueue resources");
-		return -1;
-	}
-	if (mlx5_vdpa_release_mr(priv)) {
-		DRV_LOG(ERR, "Error in unmapping MRs");
-		return -1;
-	}
-	if (priv->pd.obj && mlx5_glue->dv_devx_obj_destroy(priv->pd.obj)) {
-		DRV_LOG(ERR, "Error when deallocating PD");
-		return -1;
-	}
-	priv->pd.obj = NULL;
-	if (priv->tis.obj && mlx5_glue->dv_devx_obj_destroy(priv->tis.obj)) {
-		DRV_LOG(ERR, "Error when deallocating TIS");
-		return -1;
-	}
-	priv->tis.obj = NULL;
-	rte_atomic32_set(&priv->dev_attached, 0);
 	return 0;
 }
 
@@ -1214,24 +1073,6 @@ mlx5_vdpa_query_virtio_caps(struct vdpa_priv *priv)
 	return 0;
 }
 
-static int
-mlx5_vdpa_get_device_fd(int vid)
-{
-	int dev_id;
-	struct vdpa_priv_list *list;
-
-	dev_id = rte_vhost_get_vdpa_device_id(vid);
-	if (dev_id < 0)
-		goto error;
-	list = find_priv_resource_by_did(dev_id);
-	if (!list)
-		goto error;
-	return list->priv->ctx->cmd_fd;
-error:
-	DRV_LOG(DEBUG, "Invalid vDPA device id %d", vid);
-	return -1;
-}
-
 static int mlx5_vdpa_vfio_setup(struct vdpa_priv *priv)
 {
 	struct rte_pci_device *dev = priv->pdev;
@@ -1279,13 +1120,13 @@ static struct rte_vdpa_dev_ops mlx5_vdpa_ops = {
 	.get_features = mlx5_vdpa_get_vdpa_features,
 	.get_protocol_features = mlx5_vdpa_get_protocol_features,
 	.dev_conf = mlx5_vdpa_dev_config,
-	.dev_close = mlx5_vdpa_dev_close,
+	.dev_close = NULL,
 	.set_vring_state = NULL,
 	.set_features = NULL,
 	.migration_done = NULL,
 	.get_vfio_group_fd = NULL,
-	.get_vfio_device_fd = mlx5_vdpa_get_device_fd,
-	.get_notify_area = mlx5_vdpa_report_notify_area,
+	.get_vfio_device_fd = NULL,
+	.get_notify_area = NULL,
 };
 
 /**
@@ -1410,141 +1251,6 @@ static struct rte_pci_driver mlx5_vdpa_driver = {
 	.drv_flags = 0,
 };
 
-#ifdef RTE_LIBRTE_MLX5_DLOPEN_DEPS
-
-/**
- * Suffix RTE_EAL_PMD_PATH with "-glue".
- *
- * This function performs a sanity check on RTE_EAL_PMD_PATH before
- * suffixing its last component.
- *
- * @param buf[out]
- *   Output buffer, should be large enough otherwise NULL is returned.
- * @param size
- *   Size of @p out.
- *
- * @return
- *   Pointer to @p buf or @p NULL in case suffix cannot be appended.
- */
-static char *
-mlx5_glue_path(char *buf, size_t size)
-{
-	static const char *const bad[] = { "/", ".", "..", NULL };
-	const char *path = RTE_EAL_PMD_PATH;
-	size_t len = strlen(path);
-	size_t off;
-	int i;
-
-	while (len && path[len - 1] == '/')
-		--len;
-	for (off = len; off && path[off - 1] != '/'; --off)
-		;
-	for (i = 0; bad[i]; ++i)
-		if (!strncmp(path + off, bad[i], (int)(len - off)))
-			goto error;
-	i = snprintf(buf, size, "%.*s-glue", (int)len, path);
-	if (i == -1 || (size_t)i >= size)
-		goto error;
-	return buf;
-error:
-	DRV_LOG(ERR,
-		"unable to append \"-glue\" to last component of"
-		" RTE_EAL_PMD_PATH (\"" RTE_EAL_PMD_PATH "\"),"
-		" please re-configure DPDK");
-	return NULL;
-}
-
-/**
- * Initialization routine for run-time dependency on rdma-core.
- */
-static int
-mlx5_glue_init(void)
-{
-	/*
-	 * TODO (shahaf): move it to shared location and make sure glue
-	 * lib init only once.
-	 */
-	char glue_path[sizeof(RTE_EAL_PMD_PATH) - 1 + sizeof("-glue")];
-	const char *path[] = {
-		/*
-		 * A basic security check is necessary before trusting
-		 * MLX5_GLUE_PATH, which may override RTE_EAL_PMD_PATH.
-		 */
-		(geteuid() == getuid() && getegid() == getgid() ?
-		 getenv("MLX5_GLUE_PATH") : NULL),
-		/*
-		 * When RTE_EAL_PMD_PATH is set, use its glue-suffixed
-		 * variant, otherwise let dlopen() look up libraries on its
-		 * own.
-		 */
-		(*RTE_EAL_PMD_PATH ?
-		 mlx5_glue_path(glue_path, sizeof(glue_path)) : ""),
-	};
-	unsigned int i = 0;
-	void *handle = NULL;
-	void **sym;
-	const char *dlmsg;
-
-	while (!handle && i != RTE_DIM(path)) {
-		const char *end;
-		size_t len;
-		int ret;
-
-		if (!path[i]) {
-			++i;
-			continue;
-		}
-		end = strpbrk(path[i], ":;");
-		if (!end)
-			end = path[i] + strlen(path[i]);
-		len = end - path[i];
-		ret = 0;
-		do {
-			char name[ret + 1];
-
-			ret = snprintf(name, sizeof(name), "%.*s%s" MLX5_GLUE,
-				       (int)len, path[i],
-				       (!len || *(end - 1) == '/') ? "" : "/");
-			if (ret == -1)
-				break;
-			if (sizeof(name) != (size_t)ret + 1)
-				continue;
-			DRV_LOG(DEBUG, "looking for rdma-core glue as \"%s\"",
-				name);
-			handle = dlopen(name, RTLD_LAZY);
-			break;
-		} while (1);
-		path[i] = end + 1;
-		if (!*end)
-			++i;
-	}
-	if (!handle) {
-		rte_errno = EINVAL;
-		dlmsg = dlerror();
-		if (dlmsg)
-			DRV_LOG(WARNING, "cannot load glue library: %s", dlmsg);
-		goto glue_error;
-	}
-	sym = dlsym(handle, "mlx5_glue");
-	if (!sym || !*sym) {
-		rte_errno = EINVAL;
-		dlmsg = dlerror();
-		if (dlmsg)
-			DRV_LOG(ERR, "cannot resolve glue symbol: %s", dlmsg);
-		goto glue_error;
-	}
-	mlx5_glue = *sym;
-	return 0;
-glue_error:
-	if (handle)
-		dlclose(handle);
-	DRV_LOG(WARNING,
-		"cannot initialize PMD due to missing run-time dependency on"
-		" rdma-core libraries (libibverbs, libmlx5)");
-	return -rte_errno;
-}
-
-#endif
 /**
  * Driver initialization routine.
  */
@@ -1554,38 +1260,9 @@ RTE_INIT(rte_mlx5_vdpa_init)
 	mlx5_vdpa_logtype = rte_log_register("pmd.net.mlx5_vdpa");
 	if (mlx5_vdpa_logtype >= 0)
 		rte_log_set_level(mlx5_vdpa_logtype, RTE_LOG_NOTICE);
-
-	/*
-	 * RDMAV_HUGEPAGES_SAFE tells ibv_fork_init() we intend to use
-	 * huge pages. Calling ibv_fork_init() during init allows
-	 * applications to use fork() safely for purposes other than
-	 * using this PMD, which is not supported in forked processes.
-	 */
-	setenv("RDMAV_HUGEPAGES_SAFE", "1", 1);
-#ifdef RTE_LIBRTE_MLX5_DLOPEN_DEPS
-	if (mlx5_glue_init())
-		return;
-	assert(mlx5_glue);
-#endif
-#ifndef NDEBUG
-	/* Glue structure must not contain any NULL pointers. */
-	{
-		unsigned int i;
-
-		for (i = 0; i != sizeof(*mlx5_glue) / sizeof(void *); ++i)
-			assert(((const void *const *)mlx5_glue)[i]);
-	}
-#endif
-	if (strcmp(mlx5_glue->version, MLX5_GLUE_VERSION)) {
-		DRV_LOG(ERR,
-			"rdma-core glue \"%s\" mismatch: \"%s\" is required",
-			mlx5_glue->version, MLX5_GLUE_VERSION);
-		return;
-	}
-	mlx5_glue->fork_init();
-	rte_pci_register(&mlx5_vdpa_driver);
 }
 
 RTE_PMD_EXPORT_NAME(net_mlx5_vdpa, __COUNTER__);
+RTE_PMD_REGISTER_PCI(net_mlx5_vdpa, mlx5_vdpa_driver);
 RTE_PMD_REGISTER_PCI_TABLE(net_mlx5_vdpa, mlx5_vdpa_pci_id_map);
-RTE_PMD_REGISTER_KMOD_DEP(net_mlx5_vdpa, "* ib_uverbs & mlx5_core & mlx5_ib");
+RTE_PMD_REGISTER_KMOD_DEP(net_mlx5_vdpa, "* vfio-pci");

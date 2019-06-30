@@ -1355,8 +1355,8 @@ struct mlx5_ifc_dealloc_pd_out_bits {
 };
 
 struct mlx5_ifc_mtt_entry_bits {
-	u8 ptag[0x56];
-	u8 reserved_at_56[0x6];
+	u8 ptag[0x38];
+	u8 reserved_at_38[0x6];
 	u8 wr_en[0x1];
 	u8 rd_en[0x1];
 };

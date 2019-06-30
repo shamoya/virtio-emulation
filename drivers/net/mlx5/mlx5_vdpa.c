@@ -16,6 +16,9 @@
 #include <rte_malloc.h>
 #include <rte_common.h>
 
+#include "mlx5.h"
+#include "mlx5_defs.h"
+#include "mlx5_utils.h"
 #include "mdev_lib.h"
 #include "mlx5_prm.h"
 
@@ -296,7 +299,7 @@ static int mlx5_vdpa_create_flow_table(struct vdpa_priv *priv)
 	MLX5_SET(create_flow_table_in, in, table_type,
 		 MLX5_FLOW_TABLE_TYPE_NIC_RX);
 	err = mlx5_mdev_cmd_exec(priv->mctx, in, sizeof(in), out, sizeof(out));
-	if (err || MLX5_GET(create_flow_table_in, out, status)) {
+	if (err || MLX5_GET(create_flow_table_out, out, status)) {
 		DRV_LOG(DEBUG, "Failed to create FLOW Table");
 		return -1;
 	}
@@ -328,7 +331,7 @@ static int mlx5_vdpa_create_flow_group(struct vdpa_priv *priv)
 static int mlx5_vdpa_set_promisc_fte(struct vdpa_priv *priv)
 {
 	uint32_t in[MLX5_ST_SZ_DW(set_fte_in) +
-		    sizeof(struct mlx5_ifc_basic_dest_counter_list_bits)] = {0};
+		    sizeof(struct mlx5_ifc_dest_format_struct_bits)] = {0};
 	uint32_t out[MLX5_ST_SZ_DW(set_fte_out)] = {0};
 	void *flowc;
 	void *dst;
@@ -438,10 +441,10 @@ mlx5_vdpa_create_umem(struct vdpa_priv *priv, int umem_size, uint64_t iova,
 	 *
 	 * */
 	MLX5_SET(umemc, umemc, log_page_size, (rte_log2_u32(umem_size) >> 12));
-	MLX5_SET(umemc, umemc, num_of_mtt, 1);
+	MLX5_SET64(umemc, umemc, num_of_mtt, 1);
 	MLX5_SET(umemc, umemc, page_offset, 0);
 	mtt = MLX5_ADDR_OF(umemc, umemc, mtt);
-	MLX5_SET(mtt_entry, mtt, ptag, iova);
+	MLX5_SET64(mtt_entry, mtt, ptag, iova);
 	MLX5_SET(mtt_entry, mtt, wr_en, 1);
 	MLX5_SET(mtt_entry, mtt, rd_en, 1);
 
@@ -463,7 +466,6 @@ create_split_virtq(struct vdpa_priv *priv, int index,
 {
 	uint32_t in[MLX5_ST_SZ_DW(create_virtq_in)] = {0};
 	uint32_t out[MLX5_ST_SZ_DW(general_obj_out_cmd_hdr)] = {0};
-	struct mlx5dv_devx_obj *virtq_obj = NULL;
 	struct mlx5_mdev_memzone *umem_mz = NULL;
 	void *virtq = NULL;
 	void *hdr = NULL;
@@ -527,7 +529,7 @@ create_split_virtq(struct vdpa_priv *priv, int index,
 	MLX5_SET(virtq, virtq, umem_id, info->umem_id);
 	MLX5_SET(virtq, virtq, tisn, priv->tisn);
 	MLX5_SET(virtq, virtq, doorbell_stride_idx, index);
-	err = mlx5_mdev_cmd_exec(priv->ctx, in, sizeof(in), out, sizeof(out));
+	err = mlx5_mdev_cmd_exec(priv->mctx, in, sizeof(in), out, sizeof(out));
 	if (err || MLX5_GET(general_obj_out_cmd_hdr, out, status)) {
 		DRV_LOG(DEBUG, "Failed to create VIRTQ General Obj DEVX");
 		return -1;
@@ -577,8 +579,9 @@ static int mlx5_vdpa_setup_virtqs(struct vdpa_priv *priv)
 	return 0;
 }
 
-static uint32_t mlx5_vdpa_create_mkey(struct mlx5_mdev_context *ctx,
-				      struct mlx5_devx_mkey_attr *mkey_attr)
+static int mlx5_vdpa_create_mkey(struct mlx5_mdev_context *ctx,
+				 struct mlx5_devx_mkey_attr *mkey_attr,
+				 uint32_t *mkey_id)
 {
 	uint32_t in[MLX5_ST_SZ_DW(create_mkey_in)] = {0};
 	uint32_t out[MLX5_ST_SZ_DW(create_mkey_out)] = {0};
@@ -610,19 +613,20 @@ static uint32_t mlx5_vdpa_create_mkey(struct mlx5_mdev_context *ctx,
 
 	err = mlx5_mdev_cmd_exec(ctx, in, sizeof(in), out, sizeof(out));
 	if (err || MLX5_GET(create_mkey_out, out, status)) {
-		DRV_LOG(ERR, "Can't create mkey error %s", strerror(errno));
+		DRV_LOG(ERR, "Can't create mkey cmd");
 		return -1;
 	}
 	mkey_ix = MLX5_GET(create_mkey_out, out, mkey_index);
 	mkey_ix = (mkey_ix << 8) | MKEY_VARIANT_PART;
+	*mkey_id = mkey_ix;
 	DRV_LOG(DEBUG, "create mkey success value %d", mkey_ix);
-	return mkey_ix;
+	return 0;
 }
 
-static uint32_t
-mlx5_create_indirect_mkey(struct mlx5_mdev_context *ctx,
-			  struct mlx5_devx_mkey_attr *mkey_attr,
-			  struct mlx5_klm *klm_array, int num_klm)
+static int mlx5_create_indirect_mkey(struct mlx5_mdev_context *ctx,
+				     struct mlx5_devx_mkey_attr *mkey_attr,
+				     struct mlx5_klm *klm_array, int num_klm,
+				     uint32_t *mkey_id)
 {
 	int translations_oct_size = (((num_klm / 4) + (num_klm % 4)) * 4);
 	uint32_t in_size = MLX5_ST_SZ_DB(create_mkey_in) +
@@ -669,7 +673,8 @@ mlx5_create_indirect_mkey(struct mlx5_mdev_context *ctx,
 	}
 	mkey_ix = MLX5_GET(create_mkey_out, out, mkey_index);
 	mkey_ix = (mkey_ix << 8) | MKEY_VARIANT_PART;
-	return mkey_ix;
+	*mkey_id = mkey_ix;
+	return 0;
 }
 
 static struct vdpa_priv_list *
@@ -870,8 +875,7 @@ mlx5_vdpa_dma_map(struct vdpa_priv *priv)
 		mkey_attr.size = reg->size;
 		mkey_attr.pas_id = entry->umem_id;
 		mkey_attr.pd = priv->pdn;
-		entry->mkey_ix = mlx5_vdpa_create_mkey(priv->mctx, &mkey_attr);
-		if (entry->mkey_ix == -1) {
+		if (mlx5_vdpa_create_mkey(priv->mctx, &mkey_attr, &entry->mkey_ix)) {
 			DRV_LOG(ERR, "Unable to create Mkey");
 			goto error;
 		}
@@ -917,10 +921,8 @@ mlx5_vdpa_dma_map(struct vdpa_priv *priv)
 		DRV_LOG(ERR, "Unable to allocate memory");
 		goto error;
 	}
-	entry->mkey_ix = mlx5_create_indirect_mkey(priv->mctx,
-						   &mkey_attr,
-						   klm_array, klm_index);
-	if (entry->mkey_ix == -1) {
+	if (mlx5_create_indirect_mkey(priv->mctx, &mkey_attr,
+				      klm_array, klm_index, &entry->mkey_ix)) {
 		DRV_LOG(ERR, "Unable to create indirect Mkey");
 		goto error;
 	}
@@ -951,6 +953,7 @@ mlx5_vdpa_create_tis(struct vdpa_priv *priv)
 		return -1;
 	}
 	priv->tisn = MLX5_GET(create_tis_out, out, tisn);
+	DRV_LOG(DEBUG, "Success creating TIS 0x%x", priv->tisn);
 	return 0;
 }
 
@@ -1251,6 +1254,10 @@ static struct rte_pci_driver mlx5_vdpa_driver = {
 	.drv_flags = 0,
 };
 
+RTE_PMD_REGISTER_PCI(net_mlx5_vdpa, mlx5_vdpa_driver);
+RTE_PMD_REGISTER_PCI_TABLE(net_mlx5_vdpa, mlx5_vdpa_pci_id_map);
+RTE_PMD_REGISTER_KMOD_DEP(net_mlx5_vdpa, "* vfio-pci");
+
 /**
  * Driver initialization routine.
  */
@@ -1261,8 +1268,3 @@ RTE_INIT(rte_mlx5_vdpa_init)
 	if (mlx5_vdpa_logtype >= 0)
 		rte_log_set_level(mlx5_vdpa_logtype, RTE_LOG_NOTICE);
 }
-
-RTE_PMD_EXPORT_NAME(net_mlx5_vdpa, __COUNTER__);
-RTE_PMD_REGISTER_PCI(net_mlx5_vdpa, mlx5_vdpa_driver);
-RTE_PMD_REGISTER_PCI_TABLE(net_mlx5_vdpa, mlx5_vdpa_pci_id_map);
-RTE_PMD_REGISTER_KMOD_DEP(net_mlx5_vdpa, "* vfio-pci");

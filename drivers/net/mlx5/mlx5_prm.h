@@ -631,6 +631,29 @@ struct mlx5_ifc_manage_pages_in_bits {
 	__be64 pas[0];
 };
 
+struct mlx5_ifc_create_uctx_out_bits {
+	u8 status[0x8];
+	u8 reserved_at_8[0x18];
+	u8 syndrome[0x20];
+	u8 reserved_at_40[0x10];
+	u8 uid[0x10];
+	u8 reserved_at_60[0x20];
+};
+
+struct mlx5_ifc_uctx_bits {
+	u8 cap[0x20];
+	u8 reserved_at_20[0x160];
+};
+
+struct mlx5_ifc_create_uctx_in_bits {
+	u8 opcode[0x10];
+	u8 reserved_at_10[0x10];
+	u8 reserved_at_20[0x10];
+	u8 op_mod[0x10];
+	u8 reserved_at_40[0x40];
+	struct mlx5_ifc_uctx_bits uctx;
+};
+
 struct mlx5_ifc_fte_match_set_misc_bits {
 	u8 reserved_at_0[0x8];
 	u8 source_sqn[0x18];
@@ -1208,7 +1231,7 @@ union mlx5_ifc_hca_cap_union_bits {
 
 struct mlx5_ifc_query_hca_cap_in_bits {
 	u8 opcode[0x10];
-	u8 reserved_at_10[0x10];
+	u8 uid[0x10];
 	u8 reserved_at_20[0x10];
 	u8 op_mod[0x10];
 	u8 reserved_at_40[0x40];
@@ -1224,7 +1247,7 @@ struct mlx5_ifc_query_hca_cap_out_bits {
 
 struct mlx5_ifc_query_special_contexts_in_bits {
 	u8 opcode[0x10];
-	u8 reserved_at_10[0x10];
+	u8 uid[0x10];
 	u8 reserved_at_20[0x10];
 	u8 op_mod[0x10];
 	u8 reserved_at_40[0x40];
@@ -1273,7 +1296,8 @@ struct mlx5_ifc_tirc_bits {
 
 struct mlx5_ifc_create_tir_in_bits {
 	u8 opcode[0x10];
-	u8 reserved_at_10[0x20];
+	u8 uid[0x10];
+	u8 reserved_at_20[0x10];
 	u8 op_mod[0x10];
 	u8 reserved_at_40[0xc0];
 	struct mlx5_ifc_tirc_bits ctx;
@@ -1306,7 +1330,8 @@ struct mlx5_ifc_rqtc_bits {
 
 struct mlx5_ifc_create_rqt_in_bits {
 	u8 opcode[0x10];
-	u8 reserved_at_10[0x20];
+	u8 uid[0x10];
+	u8 reserved_at_20[0x10];
 	u8 op_mod[0x10];
 	u8 reserved_at_40[0xc0];
 	struct mlx5_ifc_rqtc_bits rqt_context;
@@ -1323,7 +1348,8 @@ struct mlx5_ifc_create_rqt_out_bits {
 
 struct mlx5_ifc_alloc_pd_in_bits {
 	u8 opcode[0x10];
-	u8 reserved_at_10[0x20];
+	u8 uid[0x10];
+	u8 reserved_at_20[0x10];
 	u8 op_mod[0x10];
 	u8 reserved_at_40[0x40];
 };
@@ -1335,23 +1361,6 @@ struct mlx5_ifc_alloc_pd_out_bits {
 	u8 reserved_at_40[0x8];
 	u8 pd[0x18];
 	u8 reserved_at_60[0x20];
-};
-
-struct mlx5_ifc_dealloc_pd_in_bits {
-	u8 opcode[0x10];
-	u8 reserved_at_10[0x10];
-	u8 reserved_at_20[0x10];
-	u8 op_mod[0x10];
-	u8 reserved_at_40[0x8];
-	u8 pd[0x18];
-	u8 reserved_at_60[0x20];
-};
-
-struct mlx5_ifc_dealloc_pd_out_bits {
-	u8 status[0x8];
-	u8 reserved_at_8[0x18];
-	u8 syndrome[0x20];
-	u8 reserved_at_40[0x40];
 };
 
 struct mlx5_ifc_mtt_entry_bits {
@@ -1371,7 +1380,7 @@ struct mlx5_ifc_umemc_bits {
 
 struct mlx5_ifc_create_umem_in_bits {
 	u8 opcode[0x10];
-	u8 reserved_at_10[0x10];
+	u8 uid[0x10];
 	u8 reserved_at_20[0x10];
 	u8 op_mod[0x10];
 	u8 reserved_at_40[0x40];
@@ -1389,7 +1398,8 @@ struct mlx5_ifc_create_umem_out_bits {
 
 struct mlx5_ifc_general_obj_in_cmd_hdr_bits {
 	u8 opcode[0x10];
-	u8 reserved_at_10[0x20];
+	u8 uid[0x10];
+	u8 reserved_at_20[0x10];
 	u8 obj_type[0x10];
 	u8 obj_id[0x20];
 	u8 reserved_at_60[0x20];
@@ -1444,7 +1454,7 @@ struct mlx5_ifc_flow_table_context_bits {
 
 struct mlx5_ifc_create_flow_table_in_bits {
 	u8 opcode[0x10];
-	u8 reserved_at_10[0x10];
+	u8 uid[0x10];
 	u8 reserved_at_20[0x10];
 	u8 op_mod[0x10];
 	u8 reserved_at_40[0x40];
@@ -1462,28 +1472,9 @@ struct mlx5_ifc_create_flow_table_out_bits {
 	u8 reserved_at_60[0x20];
 };
 
-struct mlx5_ifc_destroy_flow_table_in_bits {
-	u8 opcode[0x10];
-	u8 reserved_at_10[0x10];
-	u8 reserved_at_20[0x10];
-	u8 op_mod[0x10];
-	u8 reserved_at_40[0x40];
-	u8 table_type[0x8];
-	u8 reserved_at_88[0x20];
-	u8 table_id[0x18];
-	u8 reserved_at_c0[0x140];
-};
-
-struct mlx5_ifc_destroy_flow_table_out_bits {
-	u8 status[0x8];
-	u8 reserved_at_8[0x18];
-	u8 syndrome[0x20];
-	u8 reserved_at_40[0x40];
-};
-
 struct mlx5_ifc_set_flow_table_root_in_bits {
 	u8 opcode[0x10];
-	u8 reserved_at_10[0x10];
+	u8 uid[0x10];
 	u8 reserved_at_20[0x10];
 	u8 op_mod[0x10];
 	u8 reserved_at_40[0x40];
@@ -1502,7 +1493,7 @@ struct mlx5_ifc_set_flow_table_root_out_bits {
 
 struct mlx5_ifc_create_flow_group_in_bits {
 	u8 opcode[0x10];
-	u8 reserved_at_10[0x10];
+	u8 uid[0x10];
 	u8 reserved_at_20[0x10];
 	u8 op_mod[0x10];
 	u8 reserved_at_40[0x40];
@@ -1526,26 +1517,6 @@ struct mlx5_ifc_create_flow_group_out_bits {
 	u8 reserved_at_40[0x8];
 	u8 group_id[0x18];
 	u8 reserved_at_60[0x20];
-};
-
-struct mlx5_ifc_destroy_flow_group_in_bits {
-	u8 opcode[0x10];
-	u8 reserved_at_10[0x10];
-	u8 reserved_at_20[0x10];
-	u8 op_mod[0x10];
-	u8 reserved_at_40[0x40];
-	u8 table_type[0x8];
-	u8 reserved_at_88[0x20];
-	u8 table_id[0x18];
-	u8 group_id[0x20];
-	u8 reserved_at_e0[0x120];
-};
-
-struct mlx5_ifc_destroy_flow_group_out_bits {
-	u8 status[0x8];
-	u8 reserved_at_8[0x18];
-	u8 syndrome[0x20];
-	u8 reserved_at_40[0x40];
 };
 
 struct mlx5_ifc_vlan_bits {
@@ -1598,7 +1569,7 @@ struct mlx5_ifc_flow_context_bits {
 
 struct mlx5_ifc_set_fte_in_bits {
 	u8 opcode[0x10];
-	u8 reserved_at_10[0x10];
+	u8 uid[0x10];
 	u8 reserved_at_20[0x10];
 	u8 op_mod[0x10];
 	u8 reserved_at_40[0x40];
@@ -1632,20 +1603,15 @@ enum {
 	MLX5_CMD_OP_CREATE_MKEY            = 0x200,
 	MLX5_CMD_OP_QUERY_SPECIAL_CONTEXTS = 0x203,
 	MLX5_CMD_OP_ALLOC_PD               = 0x800,
-	MLX5_CMD_OP_DEALLOC_PD             = 0x801,
 	MLX5_CMD_OP_CREATE_TIR             = 0x900,
 	MLX5_CMD_OP_CREATE_TIS             = 0x912,
 	MLX5_CMD_OP_CREATE_RQT             = 0x916,
 	MLX5_CMD_OP_SET_FLOW_TABLE_ROOT    = 0x92f,
 	MLX5_CMD_OP_CREATE_FLOW_TABLE      = 0x930,
-	MLX5_CMD_OP_DESTROY_FLOW_TABLE     = 0x931,
 	MLX5_CMD_OP_CREATE_FLOW_GROUP      = 0x933,
-	MLX5_CMD_OP_DESTROY_FLOW_GROUP     = 0x934,
 	MLX5_CMD_OP_SET_FLOW_TABLE_ENTRY   = 0x936,
 	MLX5_CMD_OP_CREATE_GENERAL_OBJECT  = 0xa00,
-	MLX5_CMD_OP_MODIFY_GENERAL_OBJECT  = 0xa01,
-	MLX5_CMD_OP_QUERY_GENERAL_OBJECT   = 0xa02,
-	MLX5_CMD_OP_DESTROY_GENERAL_OBJECT = 0xa03,
+	MLX5_CMD_OP_CREATE_UCTX            = 0xa04,
 	MLX5_CMD_OP_CREATE_UMEM            = 0xa08,
 };
 
@@ -1666,6 +1632,10 @@ enum {
 
 enum {
 	MLX5_OBJ_TYPE_VIRTQ = 0x000d,
+};
+
+enum {
+	MLX5_UCTX_CAP_RAW_TX = 1UL << 0,
 };
 
 enum {
@@ -1886,7 +1856,7 @@ struct mlx5_ifc_create_mkey_out_bits {
 
 struct mlx5_ifc_create_mkey_in_bits {
 	u8         opcode[0x10];
-	u8         reserved_at_10[0x10];
+	u8         uid[0x10];
 	u8         reserved_at_20[0x10];
 	u8         op_mod[0x10];
 	u8         reserved_at_40[0x20];
@@ -1928,7 +1898,7 @@ struct mlx5_ifc_create_tis_out_bits {
 
 struct mlx5_ifc_create_tis_in_bits {
 	u8         opcode[0x10];
-	u8         reserved_at_10[0x10];
+	u8         uid[0x10];
 	u8         reserved_at_20[0x10];
 	u8         op_mod[0x10];
 	u8         reserved_at_40[0xc0];

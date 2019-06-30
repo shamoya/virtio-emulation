@@ -132,6 +132,7 @@ struct vdpa_priv {
 	int                           vfio_container_fd;
 	int                           vfio_group_fd;
 	int                           vfio_dev_fd;
+	uint16_t                      uid;
 	uint32_t                      pdn;
 	uint32_t                      tisn;
 	uint32_t                      gpa_mkey_index;
@@ -184,6 +185,26 @@ static inline struct mlx5_mdev_memzone* mlx5_vdpa_vfio_dma(void *owner,
 	return mz;
 }
 
+static int create_uctx(struct vdpa_priv *priv)
+{
+	uint32_t in[MLX5_ST_SZ_DW(create_uctx_in)] = {0};
+	uint32_t out[MLX5_ST_SZ_DW(create_uctx_out)] = {0};
+	void *uctx;
+	int err;
+
+	MLX5_SET(create_uctx_in, in, opcode, MLX5_CMD_OP_CREATE_UCTX);
+	uctx = MLX5_ADDR_OF(create_uctx_in, in, uctx);
+	MLX5_SET(uctx, uctx, cap, MLX5_UCTX_CAP_RAW_TX);
+	err = mlx5_mdev_cmd_exec(priv->mctx, in, sizeof(in), out, sizeof(out));
+	if (err || MLX5_GET(create_uctx_out, out, status)) {
+		DRV_LOG(ERR, "UCTX allocation failure");
+		return -1;
+	}
+	priv->uid = MLX5_GET(create_uctx_out, out, uid);
+	DRV_LOG(DEBUG, "Success creating PD 0x%x", priv->uid);
+	return 0;
+}
+
 static int create_pd(struct vdpa_priv *priv)
 {
 	uint32_t in[MLX5_ST_SZ_DW(alloc_pd_in)] = {0};
@@ -191,6 +212,7 @@ static int create_pd(struct vdpa_priv *priv)
 	int err;
 
 	MLX5_SET(alloc_pd_in, in, opcode, MLX5_CMD_OP_ALLOC_PD);
+	MLX5_SET(alloc_pd_in, in, uid, priv->uid);
 	err = mlx5_mdev_cmd_exec(priv->mctx, in, sizeof(in), out, sizeof(out));
 	if (err || MLX5_GET(alloc_pd_out, out, status)) {
 		DRV_LOG(ERR, "PD allocation failure");
@@ -229,6 +251,7 @@ static int create_rqt(struct vdpa_priv *priv)
 	int j = 0;
 
 	MLX5_SET(create_rqt_in, in, opcode, MLX5_CMD_OP_CREATE_RQT);
+	MLX5_SET(create_rqt_in, in, uid, priv->uid);
 	rqtc = MLX5_ADDR_OF(create_rqt_in, in, rqt_context);
 	MLX5_SET(rqtc, rqtc, list_q_type, MLX5_INLINE_Q_TYPE_VIRTQ);
 	MLX5_SET(rqtc, rqtc, rqt_max_size, MLX5_VDPA_SW_MAX_VIRTQS_SUPPORTED);
@@ -266,6 +289,7 @@ static int create_tir(struct vdpa_priv *priv)
 	int err;
 
 	MLX5_SET(create_tir_in, in, opcode, MLX5_CMD_OP_CREATE_TIR);
+	MLX5_SET(create_tir_in, in, uid, priv->uid);
 	tirc = MLX5_ADDR_OF(create_tir_in, in, ctx);
 	MLX5_SET(tirc, tirc, disp_type, MLX5_TIRC_DISP_TYPE_INDIRECT);
 	MLX5_SET(tirc, tirc, indirect_table, priv->rx_steer_info.rqtn);
@@ -296,6 +320,7 @@ static int mlx5_vdpa_create_flow_table(struct vdpa_priv *priv)
 
 	MLX5_SET(create_flow_table_in, in, opcode,
 		 MLX5_CMD_OP_CREATE_FLOW_TABLE);
+	MLX5_SET(create_flow_table_in, in, uid, priv->uid);
 	MLX5_SET(create_flow_table_in, in, table_type,
 		 MLX5_FLOW_TABLE_TYPE_NIC_RX);
 	err = mlx5_mdev_cmd_exec(priv->mctx, in, sizeof(in), out, sizeof(out));
@@ -315,6 +340,7 @@ static int mlx5_vdpa_create_flow_group(struct vdpa_priv *priv)
 
 	MLX5_SET(create_flow_group_in, in, opcode,
 		 MLX5_CMD_OP_CREATE_FLOW_GROUP);
+	MLX5_SET(create_flow_group_in, in, uid, priv->uid);
 	MLX5_SET(create_flow_group_in, in, table_id, priv->rx_steer_info.ftn);
 	MLX5_SET(create_flow_group_in, in, table_type,
 		 MLX5_FLOW_TABLE_TYPE_NIC_RX);
@@ -338,6 +364,7 @@ static int mlx5_vdpa_set_promisc_fte(struct vdpa_priv *priv)
 	int err;
 
 	MLX5_SET(set_fte_in, in, opcode, MLX5_CMD_OP_SET_FLOW_TABLE_ENTRY);
+	MLX5_SET(set_fte_in, in, uid, priv->uid);
 	MLX5_SET(set_fte_in, in, table_id, priv->rx_steer_info.ftn);
 	MLX5_SET(set_fte_in, in, table_type, MLX5_FLOW_TABLE_TYPE_NIC_RX);
 	flowc = MLX5_ADDR_OF(set_fte_in, in, flowc);
@@ -367,6 +394,7 @@ static int mlx5_vdpa_set_flow_table_root(struct vdpa_priv *priv)
 
 	MLX5_SET(set_flow_table_root_in, in, opcode,
 		 MLX5_CMD_OP_SET_FLOW_TABLE_ROOT);
+	MLX5_SET(set_flow_table_root_in, in, uid, priv->uid);
 	MLX5_SET(set_flow_table_root_in, in, table_type,
 		 MLX5_FLOW_TABLE_TYPE_NIC_RX);
 	MLX5_SET(set_flow_table_root_in, in, table_id,
@@ -421,8 +449,8 @@ exit:
 }
 
 static int
-mlx5_vdpa_create_umem(struct vdpa_priv *priv, int umem_size, uint64_t iova,
-		      uint32_t *umem_id)
+mlx5_vdpa_create_umem(struct vdpa_priv *priv, uint64_t umem_size,
+		      uint64_t iova, uint32_t *umem_id)
 {
 	uint8_t in[MLX5_ST_SZ_DB(create_umem_in) +
 		   sizeof(struct mlx5_ifc_mtt_entry_bits)] = {0};
@@ -432,6 +460,7 @@ mlx5_vdpa_create_umem(struct vdpa_priv *priv, int umem_size, uint64_t iova,
 	int err;
 
 	MLX5_SET(create_umem_in, in, opcode, MLX5_CMD_OP_CREATE_UMEM);
+	MLX5_SET(create_umem_in, in, uid, priv->uid);
 	umemc = MLX5_ADDR_OF(create_umem_in, in, umem_context);
 	/*
 	 * Important: This function assumes the buffer represented by
@@ -490,6 +519,7 @@ create_split_virtq(struct vdpa_priv *priv, int index,
 	hdr = MLX5_ADDR_OF(create_virtq_in, in, hdr);
 	MLX5_SET(general_obj_in_cmd_hdr, hdr, opcode,
 		 MLX5_CMD_OP_CREATE_GENERAL_OBJECT);
+	MLX5_SET(general_obj_in_cmd_hdr, in, uid, priv->uid);
 	MLX5_SET(general_obj_in_cmd_hdr, hdr, obj_type, MLX5_OBJ_TYPE_VIRTQ);
 	virtq = MLX5_ADDR_OF(create_virtq_in, in, virtq);
 	if (is_virtq_recvq(index, priv->nr_vring)) {
@@ -581,6 +611,7 @@ static int mlx5_vdpa_setup_virtqs(struct vdpa_priv *priv)
 
 static int mlx5_vdpa_create_mkey(struct mlx5_mdev_context *ctx,
 				 struct mlx5_devx_mkey_attr *mkey_attr,
+				 uint16_t uid,
 				 uint32_t *mkey_id)
 {
 	uint32_t in[MLX5_ST_SZ_DW(create_mkey_in)] = {0};
@@ -591,6 +622,7 @@ static int mlx5_vdpa_create_mkey(struct mlx5_mdev_context *ctx,
 	int err;
 
 	MLX5_SET(create_mkey_in, in, opcode, MLX5_CMD_OP_CREATE_MKEY);
+	MLX5_SET(create_mkey_in, in, uid, uid);
 	mkc = MLX5_ADDR_OF(create_mkey_in, in, memory_key_mkey_entry);
 	MLX5_SET(mkc, mkc, lw, 0x1);
 	MLX5_SET(mkc, mkc, lr, 0x1);
@@ -626,7 +658,7 @@ static int mlx5_vdpa_create_mkey(struct mlx5_mdev_context *ctx,
 static int mlx5_create_indirect_mkey(struct mlx5_mdev_context *ctx,
 				     struct mlx5_devx_mkey_attr *mkey_attr,
 				     struct mlx5_klm *klm_array, int num_klm,
-				     uint32_t *mkey_id)
+				     uint16_t uid, uint32_t *mkey_id)
 {
 	int translations_oct_size = (((num_klm / 4) + (num_klm % 4)) * 4);
 	uint32_t in_size = MLX5_ST_SZ_DB(create_mkey_in) +
@@ -639,6 +671,7 @@ static int mlx5_create_indirect_mkey(struct mlx5_mdev_context *ctx,
 	int err;
 
 	MLX5_SET(create_mkey_in, in, opcode, MLX5_CMD_OP_CREATE_MKEY);
+	MLX5_SET(create_mkey_in, in, uid, uid);
 	mkc = MLX5_ADDR_OF(create_mkey_in, in, memory_key_mkey_entry);
 	MLX5_SET(mkc, mkc, lw, 0x1);
 	MLX5_SET(mkc, mkc, lr, 0x1);
@@ -875,7 +908,8 @@ mlx5_vdpa_dma_map(struct vdpa_priv *priv)
 		mkey_attr.size = reg->size;
 		mkey_attr.pas_id = entry->umem_id;
 		mkey_attr.pd = priv->pdn;
-		if (mlx5_vdpa_create_mkey(priv->mctx, &mkey_attr, &entry->mkey_ix)) {
+		if (mlx5_vdpa_create_mkey(priv->mctx, &mkey_attr, priv->uid,
+					  &entry->mkey_ix)) {
 			DRV_LOG(ERR, "Unable to create Mkey");
 			goto error;
 		}
@@ -922,7 +956,8 @@ mlx5_vdpa_dma_map(struct vdpa_priv *priv)
 		goto error;
 	}
 	if (mlx5_create_indirect_mkey(priv->mctx, &mkey_attr,
-				      klm_array, klm_index, &entry->mkey_ix)) {
+				      klm_array, klm_index, priv->uid,
+				      &entry->mkey_ix)) {
 		DRV_LOG(ERR, "Unable to create indirect Mkey");
 		goto error;
 	}
@@ -947,6 +982,7 @@ mlx5_vdpa_create_tis(struct vdpa_priv *priv)
 	int err;
 
 	MLX5_SET(create_tis_in, in, opcode, MLX5_CMD_OP_CREATE_TIS);
+	MLX5_SET(create_tis_in, in, uid, priv->uid);
 	err = mlx5_mdev_cmd_exec(priv->mctx, in, sizeof(in), out, sizeof(out));
 	if (err || MLX5_GET(create_tis_out, out, status)) {
 		DRV_LOG(ERR, "Can't create TIS");
@@ -1018,6 +1054,7 @@ mlx5_vdpa_query_virtio_caps(struct vdpa_priv *priv)
 	void *cap = NULL;
 
 	MLX5_SET(query_hca_cap_in, in, opcode, MLX5_CMD_OP_QUERY_HCA_CAP);
+	MLX5_SET(query_hca_cap_in, in, uid, priv->uid);
 	MLX5_SET(query_hca_cap_in, in, op_mod,
 			(MLX5_HCA_CAP_GENERAL << 1) |
 			(MLX5_HCA_CAP_OPMOD_GET_CUR & 0x1));
@@ -1035,6 +1072,7 @@ mlx5_vdpa_query_virtio_caps(struct vdpa_priv *priv)
 	/* Query the actual dump key. */
 	MLX5_SET(query_special_contexts_in, in_special, opcode,
 		 MLX5_CMD_OP_QUERY_SPECIAL_CONTEXTS);
+	MLX5_SET(query_special_contexts_in, in, uid, priv->uid);
 	if (mlx5_mdev_cmd_exec(priv->mctx, in_special,
 			       sizeof(in_special), out_special,
 			       sizeof(out_special))) {
@@ -1112,9 +1150,15 @@ static int mlx5_vdpa_init_device(struct vdpa_priv *priv)
 	priv->base_addr = (void*)pdev->mem_resource[0].addr;
 	priv->mctx = mdev_open_device((void*)priv, priv->base_addr,
 				      drv_ver, mlx5_vdpa_vfio_dma);
-	if (!priv->mctx)
+	if (!priv->mctx) {
+		DRV_LOG(ERR, "failed to start up device via mdev");
+		return -1;
+	}
+	if (create_uctx(priv)) {
+		DRV_LOG(ERR, "failed to crete UCTX");
 		return -1;
 
+	}
 	return 0;
 }
 

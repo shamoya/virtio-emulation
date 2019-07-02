@@ -103,7 +103,6 @@ struct vdpa_priv {
 	int                           vfio_container_fd;
 	int                           vfio_group_fd;
 	int                           vfio_dev_fd;
-	uint16_t                      uid;
 	uint32_t                      pdn;
 	uint32_t                      tisn;
 	uint32_t                      mkey_ix;
@@ -153,26 +152,6 @@ static inline struct mlx5_mdev_memzone* mlx5_vdpa_vfio_dma(void *owner,
 	mz->addr = va;
 	mz->phys_addr = iova;
 	return mz;
-}
-
-static int create_uctx(struct vdpa_priv *priv)
-{
-	uint32_t in[MLX5_ST_SZ_DW(create_uctx_in)] = {0};
-	uint32_t out[MLX5_ST_SZ_DW(create_uctx_out)] = {0};
-	void *uctx;
-	int err;
-
-	MLX5_SET(create_uctx_in, in, opcode, MLX5_CMD_OP_CREATE_UCTX);
-	uctx = MLX5_ADDR_OF(create_uctx_in, in, uctx);
-	MLX5_SET(uctx, uctx, cap, MLX5_UCTX_CAP_RAW_TX);
-	err = mlx5_mdev_cmd_exec(priv->mctx, in, sizeof(in), out, sizeof(out));
-	if (err || MLX5_GET(create_uctx_out, out, status)) {
-		DRV_LOG(ERR, "UCTX allocation failure");
-		return -1;
-	}
-	priv->uid = MLX5_GET(create_uctx_out, out, uid);
-	DRV_LOG(DEBUG, "Success creating PD 0x%x", priv->uid);
-	return 0;
 }
 
 static int create_pd(struct vdpa_priv *priv)
@@ -423,7 +402,6 @@ mlx5_vdpa_create_umem(struct vdpa_priv *priv, uint64_t umem_size,
 	int err;
 
 	MLX5_SET(create_umem_in, in, opcode, MLX5_CMD_OP_CREATE_UMEM);
-	MLX5_SET(create_umem_in, in, uid, priv->uid);
 	umemc = MLX5_ADDR_OF(create_umem_in, in, umem_context);
 	/*
 	 * Important: This function assumes the buffer represented by
@@ -558,20 +536,17 @@ static int mlx5_vdpa_setup_virtqs(struct vdpa_priv *priv)
 		rte_vhost_get_vhost_vring(priv->vid, i, &vq);
 		if (create_split_virtq(priv, i, &vq)) {
 			DRV_LOG(ERR, "Create VIRTQ general obj failed");
-			/* TODO(idos): Remove and fail when FW supports */
-			DRV_LOG(INFO, "Still no FW support, continuing..");
+			return -1;
 		}
 	}
 	if (mlx5_vdpa_setup_rx_steering(priv)) {
 		DRV_LOG(ERR, "Create Steering for RX failed");
-		/* TODO: Remove and fail when FW supports */
-		DRV_LOG(INFO, "Still no FW support, continuing..");
+		return -1;
 	}
 	return 0;
 }
 
-static int mlx5_vdpa_create_mkey(struct vdpa_priv *priv, uint64_t addr,
-				 uint64_t size)
+static int mlx5_vdpa_create_mkey(struct vdpa_priv *priv)
 {
 	uint32_t in[MLX5_ST_SZ_DW(create_mkey_in)] = {0};
 	uint32_t out[MLX5_ST_SZ_DW(create_mkey_out)] = {0};
@@ -588,8 +563,7 @@ static int mlx5_vdpa_create_mkey(struct vdpa_priv *priv, uint64_t addr,
 	MLX5_SET(mkc, mkc, qpn, 0xffffff);
 	MLX5_SET(mkc, mkc, pd, priv->pdn);
 	MLX5_SET(mkc, mkc, mkey_7_0, MKEY_VARIANT_PART);
-	MLX5_SET64(mkc, mkc, start_addr, addr);
-	MLX5_SET64(mkc, mkc, len, size);
+	MLX5_SET64(mkc, mkc, length64, 1);
 	err = mlx5_mdev_cmd_exec(priv->mctx, in, sizeof(in), out, sizeof(out));
 	if (err || MLX5_GET(create_mkey_out, out, status)) {
 		DRV_LOG(ERR, "Can't create mkey cmd");
@@ -741,17 +715,12 @@ mlx5_vdpa_dma_map(struct vdpa_priv *priv)
 	int ret;
 	struct rte_vhost_memory *mem = NULL;
 	struct rte_vhost_mem_region *reg = NULL;
-	uint64_t mem_size;
-	uint64_t addr;
 
 	ret = rte_vhost_get_mem_table(priv->id, &mem);
 	if (ret < 0) {
 		DRV_LOG(ERR, "failed to get VM memory layout.");
 		return -1;
 	}
-	mem_size = (mem->regions[(mem->nregions - 1)].guest_phys_addr) +
-				(mem->regions[(mem->nregions - 1)].size) -
-				(mem->regions[0].guest_phys_addr);
 	for (i = 0; i < mem->nregions; i++) {
 		reg = &mem->regions[i];
 		DRV_LOG(INFO, "region %u: HVA 0x%" PRIx64 ", "
@@ -766,9 +735,8 @@ mlx5_vdpa_dma_map(struct vdpa_priv *priv)
 			goto error;
 		}
 	}
-	addr = (uint64_t)mem->regions[0].guest_phys_addr;
-	if (mlx5_vdpa_create_mkey(priv, addr, mem_size)) {
-		DRV_LOG(ERR, "Unable to create indirect Mkey");
+	if (mlx5_vdpa_create_mkey(priv)) {
+		DRV_LOG(ERR, "Unable to create PA MKEY");
 		goto error;
 	}
 	return 0;
@@ -854,7 +822,6 @@ mlx5_vdpa_query_virtio_caps(struct vdpa_priv *priv)
 	void *cap = NULL;
 
 	MLX5_SET(query_hca_cap_in, in, opcode, MLX5_CMD_OP_QUERY_HCA_CAP);
-	MLX5_SET(query_hca_cap_in, in, uid, priv->uid);
 	MLX5_SET(query_hca_cap_in, in, op_mod,
 			(MLX5_HCA_CAP_GENERAL << 1) |
 			(MLX5_HCA_CAP_OPMOD_GET_CUR & 0x1));
@@ -931,11 +898,6 @@ static int mlx5_vdpa_init_device(struct vdpa_priv *priv)
 	if (!priv->mctx) {
 		DRV_LOG(ERR, "failed to start up device via mdev");
 		return -1;
-	}
-	if (create_uctx(priv)) {
-		DRV_LOG(ERR, "failed to crete UCTX");
-		return -1;
-
 	}
 	return 0;
 }

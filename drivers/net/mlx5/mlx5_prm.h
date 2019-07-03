@@ -628,7 +628,7 @@ struct mlx5_ifc_manage_pages_in_bits {
 	u8 reserved_bits[0x0f];
 	u8 function_id[0x10];
 	u8 input_num_entries[0x20];
-	__be64 pas[0];
+	__be64 pas[0x20];
 };
 
 struct mlx5_ifc_create_uctx_out_bits {
@@ -1375,7 +1375,7 @@ struct mlx5_ifc_umemc_bits {
 	u8 log_page_size[0x5];
 	u8 page_offset[0x20];
 	u8 num_of_mtt[0x40];
-	struct mlx5_ifc_mtt_entry_bits mtt[0];
+	struct mlx5_ifc_mtt_entry_bits mtt[1];
 };
 
 struct mlx5_ifc_create_umem_in_bits {

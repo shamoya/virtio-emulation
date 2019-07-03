@@ -254,11 +254,11 @@ static int mlx5_mdev_query_pages(struct mlx5_mdev_context *ctx, int boot,
 static int mlx5_mdev_give_pages(struct mlx5_mdev_context *ctx,
 				uint16_t func_id, int32_t npages)
 {
-	uint8_t in[MLX5_ST_SZ_DB(manage_pages_in) +
-		   (MLX5_MDEV_MAX_NUM_OF_PAGES * sizeof(uint64_t))] = {0};
+	uint32_t in[MLX5_ST_SZ_DW(manage_pages_in)] = {0};
 	uint32_t out[MLX5_ST_SZ_DW(manage_pages_out)] = {0};
-	int ilen = MLX5_ST_SZ_DB(manage_pages_in) +
-			(npages * sizeof(uint64_t));
+	int ilen = MLX5_ST_SZ_DB(manage_pages_in) -
+			((MLX5_MDEV_MAX_NUM_OF_PAGES - npages) *
+			 sizeof(uint64_t));
 	int res = 0;
 	int i;
 	const struct mlx5_mdev_memzone *mz;

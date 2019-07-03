@@ -394,8 +394,7 @@ static int
 mlx5_vdpa_create_umem(struct vdpa_priv *priv, uint64_t umem_size,
 		      uint64_t iova, uint32_t *umem_id)
 {
-	uint8_t in[MLX5_ST_SZ_DB(create_umem_in) +
-		   sizeof(struct mlx5_ifc_mtt_entry_bits)] = {0};
+	uint32_t in[MLX5_ST_SZ_DW(create_umem_in)] = {0};
 	uint32_t out[MLX5_ST_SZ_DW(create_umem_out)] = {0};
 	void *umemc;
 	void *mtt;

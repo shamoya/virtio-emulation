@@ -1966,7 +1966,7 @@ struct mlx5_ifc_create_mkey_in_bits {
 	u8         reserved_at_40[0x20];
 	u8         pg_access[0x1];
 	u8         mkey_umem_valid[0x1];
-	u8         reserved_at_61[0x1e];
+	u8         reserved_at_62[0x1e];
 	struct mlx5_ifc_mkc_bits memory_key_mkey_entry;
 	u8         reserved_at_280[0x80];
 	u8         translations_octword_actual_size[0x20];

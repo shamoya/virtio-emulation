@@ -562,7 +562,7 @@ static int mlx5_vdpa_create_mkey(struct vdpa_priv *priv)
 	MLX5_SET(mkc, mkc, qpn, 0xffffff);
 	MLX5_SET(mkc, mkc, pd, priv->pdn);
 	MLX5_SET(mkc, mkc, mkey_7_0, MKEY_VARIANT_PART);
-	MLX5_SET64(mkc, mkc, length64, 1);
+	MLX5_SET(mkc, mkc, length64, 1);
 	err = mlx5_mdev_cmd_exec(priv->mctx, in, sizeof(in), out, sizeof(out));
 	if (err || MLX5_GET(create_mkey_out, out, status)) {
 		DRV_LOG(ERR, "Can't create mkey cmd");

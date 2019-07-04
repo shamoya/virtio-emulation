@@ -374,12 +374,47 @@ static int mlx5_mdev_check_hca_cap(struct mlx5_mdev_context *ctx)
 	if ((MLX5_CAP_GEN(ctx, port_type) != MLX5_CAP_PORT_TYPE_ETH)	    ||
 	    (MLX5_CAP_GEN(ctx, num_ports) > 1)				    ||
 	    (MLX5_CAP_GEN(ctx, cqe_version) != 1)			    ||
+	    (MLX5_CAP_GEN(ctx, eth_virt) == 0)				    ||
 	     0) {
 		RTE_LOG(ERR, PMD, "mlx5_mdev_check_hca_cap failed\n");
 		return -EOPNOTSUPP;
 	}
 
 	return 0;
+}
+
+static int mlx5_mdev_enable_roce(struct mlx5_mdev_context *ctx)
+{
+	uint32_t in[MLX5_ST_SZ_DW(query_nic_vport_context_in)] = {0};
+	uint32_t out[MLX5_ST_SZ_DW(query_nic_vport_context_out)] = {0};
+	uint32_t in_mod[MLX5_ST_SZ_DW(modify_nic_vport_context_in)] = {0};
+	uint32_t out_mod[MLX5_ST_SZ_DW(modify_nic_vport_context_out)] = {0};
+	void *nic_vport_ctx;
+	uint32_t status;
+	void *fld_mod;
+	int err;
+
+	MLX5_SET(query_nic_vport_context_in, in, opcode,
+		 MLX5_CMD_OP_QUERY_NIC_VPORT_CONTEXT);
+	mlx5_mdev_cmd_exec(ctx, in, sizeof(in), out, sizeof(out));
+	nic_vport_ctx = MLX5_ADDR_OF(query_nic_vport_context_out, out,
+				     nic_vport_context);
+	if (MLX5_GET(nic_vport_context, nic_vport_ctx, roce_en))
+		return 0;
+	MLX5_SET(modify_nic_vport_context_in, in_mod, opcode,
+			 MLX5_CMD_OP_MODIFY_NIC_VPORT_CONTEXT);
+	fld_mod = MLX5_ADDR_OF(modify_nic_vport_context_in, in_mod,
+			       field_select);
+	nic_vport_ctx = MLX5_ADDR_OF(modify_nic_vport_context_in, in_mod,
+				     nic_vport_context);
+	MLX5_SET(modify_nic_vport_field_select, fld_mod, roce_en, 0x1);
+	MLX5_SET(nic_vport_context, nic_vport_ctx, roce_en, 0x1);
+	err = mlx5_mdev_cmd_exec(ctx, in_mod, sizeof(in_mod), out_mod,
+				 sizeof(out_mod));
+	if (err)
+		return err;
+	status = MLX5_GET(modify_nic_vport_context_out, out, status);
+	return status;
 }
 
 struct mlx5_mdev_context * mdev_open_device(void *owner,
@@ -436,7 +471,9 @@ struct mlx5_mdev_context * mdev_open_device(void *owner,
 		if (err)
 			goto err_teardown_hca;
 	}
-
+	err = mlx5_mdev_enable_roce(ctx);
+	if (err)
+		goto err_teardown_hca;
 	return ctx;
 err_teardown_hca:
 	mlx5_mdev_teardown_hca(ctx);

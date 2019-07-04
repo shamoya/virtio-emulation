@@ -396,6 +396,7 @@ mlx5_vdpa_create_umem(struct vdpa_priv *priv, uint64_t umem_size,
 {
 	uint32_t in[MLX5_ST_SZ_DW(create_umem_in)] = {0};
 	uint32_t out[MLX5_ST_SZ_DW(create_umem_out)] = {0};
+	unsigned umem_log_4kb_page_size;
 	void *umemc;
 	void *mtt;
 	int err;
@@ -409,8 +410,9 @@ mlx5_vdpa_create_umem(struct vdpa_priv *priv, uint64_t umem_size,
 	 * than 4KB) and naturally aligned.
 	 *
 	 * */
-	MLX5_SET(umemc, umemc, log_page_size, (rte_log2_u32(umem_size) >> 12));
-	MLX5_SET64(umemc, umemc, num_of_mtt, 1);
+	umem_log_4kb_page_size = (rte_log2_u32(umem_size) - 12);
+	MLX5_SET(umemc, umemc, log_page_size, umem_log_4kb_page_size);
+	MLX5_SET64(umemc, umemc, num_of_mtt, 0x1);
 	MLX5_SET(umemc, umemc, page_offset, 0);
 	mtt = MLX5_ADDR_OF(umemc, umemc, mtt);
 	MLX5_SET64(mtt_entry, mtt, ptag, iova);

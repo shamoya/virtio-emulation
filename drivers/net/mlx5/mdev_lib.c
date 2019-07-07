@@ -46,17 +46,15 @@ int mlx5_mdev_cmd_exec(struct mlx5_mdev_context *ctx, void *in, int ilen,
 	char *cin = (char *)in;
 	char *cout = (char *)out;
 	int output_len = olen;
+	int input_len = ilen;
 	int temp_len;
+	int number_of_ibox = ilen > (512+16) ? (ilen-16) / 512 + 1 : 1;
 	int number_of_obox = olen > (512+16) ? (olen-16) / 512 + 1 : 1;
 	int i;
-	struct mlx5_cmd_block	*obox = &cmd->obox;
+	struct mlx5_cmd_block *obox = &cmd->obox;
+	struct mlx5_cmd_block *ibox = &cmd->ibox;
 	volatile uint8_t *status_own = &cmd->entry.status_own;
 
-	if (ilen > 512)  {
-		RTE_LOG(ERR, PMD, "mlx5e_cmd_exec: len>512 ilen=%d olen=%d\n",
-			ilen, olen);
-		return -EIO;
-	}
 	for(i=1; i < number_of_obox; i++) {
 		obox->next = MDEV_CPU_TO_BE_64(ctx->ms.phys_addr + (i-1)*1024);
 		obox = (struct mlx5_cmd_block *)((uint8_t*)ctx->ms.addr
@@ -69,7 +67,21 @@ int mlx5_mdev_cmd_exec(struct mlx5_mdev_context *ctx, void *in, int ilen,
 	obox = &cmd->obox;
 
 	memcpy(cmd->entry.in, in, 16);
-	memcpy(cmd->ibox.data, cin + 16, (ilen > 16) ? (ilen - 16) : 0);
+	input_len -= 16;
+	temp_len = RTE_MIN(512, input_len);
+	memcpy(ibox->data, cin + 16, temp_len);
+	input_len -= temp_len;
+	if (input_len > 0) {
+		for (i = 1; i < number_of_ibox; i++) {
+			ibox->next = MDEV_CPU_TO_BE_64(ctx->in_ms.phys_addr + (i - 1) * 1024);
+			ibox = (struct mlx5_cmd_block *)((uint8_t*)ctx->in_ms.addr + (i - 1) * 1024);
+			ibox->block_num = MDEV_CPU_TO_BE_32(i);
+			temp_len = RTE_MIN(512, input_len);
+			memcpy(ibox->data, cin + ilen - input_len, temp_len);
+			input_len -= temp_len;
+		}
+	}
+	ibox->next = 0x0;
 	cmd->entry.ilen = rte_cpu_to_be_32(ilen);
 	cmd->entry.olen = rte_cpu_to_be_32(olen);
 	cmd->entry.status_own = 0x1;
@@ -126,6 +138,14 @@ static int mlx5_mdev_cmd_init(struct mlx5_mdev_context *ctx)
 		return -ENOMEM;
 	ctx->ms.addr = mz->addr;
 	ctx->ms.phys_addr = mz->phys_addr;
+	mz = ctx->alloc_function(ctx->owner,
+				 "in_mailboxspace",
+				 4096*2,
+				 4096);
+	if (!mz)
+		return -ENOMEM;
+	ctx->in_ms.addr = mz->addr;
+	ctx->in_ms.phys_addr = mz->phys_addr;
 	return 0;
 }
 

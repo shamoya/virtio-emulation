@@ -57,6 +57,7 @@ struct mlx5_mdev_context {
 	struct mlx5_mdev_cmd *cmd; /* todo: remove when using verbs */
 	uint64_t cmd_pa; /* todo: remove when using verbs */
 	struct mlx5_mdev_memzone ms; /* todo: remove when using verbs */
+	struct mlx5_mdev_memzone in_ms;
 	struct mlx5_mdev_cap cap;
 	uint32_t pd;
 	uint32_t td;

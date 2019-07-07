@@ -274,6 +274,7 @@ static int mlx5_vdpa_create_flow_table(struct vdpa_priv *priv)
 		return -1;
 	}
 	priv->rx_steer_info.ftn = MLX5_GET(create_flow_table_out, out, table_id);
+	DRV_LOG(DEBUG, "Success creating FT 0x%x", priv->rx_steer_info.ftn);
 	return 0;
 }
 
@@ -290,11 +291,12 @@ static int mlx5_vdpa_create_flow_group(struct vdpa_priv *priv)
 		 MLX5_FLOW_TABLE_TYPE_NIC_RX);
 	err = mlx5_mdev_cmd_exec(priv->mctx, in, sizeof(in), out, sizeof(out));
 	if (err || MLX5_GET(create_flow_group_out, out, status)) {
-		DRV_LOG(DEBUG, "Failed to create FLOW Table");
+		DRV_LOG(DEBUG, "Failed to create FLOW Group");
 		return -1;
 	}
 	priv->rx_steer_info.fgn = MLX5_GET(create_flow_group_out, out,
 					   group_id);
+	DRV_LOG(DEBUG, "Success creating FG 0x%x", priv->rx_steer_info.fgn);
 	return 0;
 }
 
@@ -323,7 +325,7 @@ static int mlx5_vdpa_set_promisc_fte(struct vdpa_priv *priv)
 		 priv->rx_steer_info.tirn);
 	err = mlx5_mdev_cmd_exec(priv->mctx, in, sizeof(in), out, sizeof(out));
 	if (err || MLX5_GET(set_fte_out, out, status)) {
-		DRV_LOG(DEBUG, "Failed to create FLOW Table");
+		DRV_LOG(DEBUG, "Failed to create FTE");
 		return -1;
 	}
 	return 0;
@@ -343,7 +345,7 @@ static int mlx5_vdpa_set_flow_table_root(struct vdpa_priv *priv)
 		 priv->rx_steer_info.ftn);
 	err = mlx5_mdev_cmd_exec(priv->mctx, in, sizeof(in), out, sizeof(out));
 	if (err || MLX5_GET(set_flow_table_root_out, out, status)) {
-		DRV_LOG(DEBUG, "Failed to create FLOW Table");
+		DRV_LOG(DEBUG, "Failed to set FLOW Table root");
 		return -1;
 	}
 	return 0;

@@ -712,7 +712,7 @@ mlx5_vdpa_setup_notify_relay(struct vdpa_priv *priv)
 }
 
 static int
-mlx5_vdpa_dma_map(struct vdpa_priv *priv)
+mlx5_vdpa_dma_map(struct vdpa_priv *priv, int do_map)
 {
 	uint32_t i;
 	int ret;
@@ -729,18 +729,31 @@ mlx5_vdpa_dma_map(struct vdpa_priv *priv)
 		DRV_LOG(INFO, "region %u: HVA 0x%" PRIx64 ", "
 			"GPA 0x%" PRIx64 ", size 0x%" PRIx64 ".", i,
 			reg->host_user_addr, reg->guest_phys_addr, reg->size);
-		ret = rte_vfio_container_dma_map(priv->vfio_container_fd,
-						 reg->host_user_addr,
-						 reg->guest_phys_addr,
-						 reg->size);
-		if (ret < 0) {
-			DRV_LOG(ERR, "Failed to VFIO DMA Map");
-			goto error;
+		if (do_map) {
+			ret = rte_vfio_container_dma_map(priv->vfio_container_fd,
+							 reg->host_user_addr,
+							 reg->guest_phys_addr,
+							 reg->size);
+			if (ret < 0) {
+				DRV_LOG(ERR, "Failed to VFIO DMA Map");
+				goto error;
+			}
+		} else {
+			ret = rte_vfio_container_dma_unmap(priv->vfio_container_fd,
+							   reg->host_user_addr,
+							   reg->guest_phys_addr,
+							   reg->size);
+			if (ret < 0) {
+				DRV_LOG(ERR, "Failed to VFIO DMA UnMap");
+				goto error;
+			}
 		}
 	}
-	if (mlx5_vdpa_create_mkey(priv)) {
-		DRV_LOG(ERR, "Unable to create PA MKEY");
-		goto error;
+	if (do_map) {
+		if (mlx5_vdpa_create_mkey(priv)) {
+			DRV_LOG(ERR, "Unable to create PA MKEY");
+			goto error;
+		}
 	}
 	return 0;
 error:
@@ -790,7 +803,7 @@ mlx5_vdpa_dev_config(int vid)
 		DRV_LOG(ERR, "Error creating TIS");
 		return -1;
 	}
-	if (mlx5_vdpa_dma_map(priv)) {
+	if (mlx5_vdpa_dma_map(priv, 1)) {
 		DRV_LOG(ERR, "Error DMA mapping VM memory");
 		return -1;
 	}
@@ -800,6 +813,26 @@ mlx5_vdpa_dev_config(int vid)
 	}
 	mlx5_vdpa_setup_notify_relay(priv);
 	rte_atomic32_set(&priv->dev_attached, 1);
+	return 0;
+}
+
+static int mlx5_vdpa_dev_close(int vid)
+{
+	int did;
+	struct vdpa_priv_list *list_elem;
+	struct vdpa_priv *priv;
+
+	did = rte_vhost_get_vdpa_device_id(vid);
+	list_elem = find_priv_resource_by_did(did);
+	if (list_elem == NULL) {
+		DRV_LOG(ERR, "Invalid device id: %d", did);
+		return -1;
+	}
+	priv = list_elem->priv;
+	if (mlx5_vdpa_dma_map(priv, 0)) {
+		DRV_LOG(ERR, "Error DMA mapping VM memory");
+		return -1;
+	}
 	return 0;
 }
 
@@ -944,7 +977,7 @@ static struct rte_vdpa_dev_ops mlx5_vdpa_ops = {
 	.get_features = mlx5_vdpa_get_vdpa_features,
 	.get_protocol_features = mlx5_vdpa_get_protocol_features,
 	.dev_conf = mlx5_vdpa_dev_config,
-	.dev_close = NULL,
+	.dev_close = mlx5_vdpa_dev_close,
 	.set_vring_state = NULL,
 	.set_features = NULL,
 	.migration_done = NULL,

@@ -756,6 +756,38 @@ struct mlx5_ifc_modify_nic_vport_context_in_bits {
 	struct mlx5_ifc_nic_vport_context_bits nic_vport_context;
 };
 
+struct mlx5_ifc_set_roce_address_out_bits {
+	u8 status[0x8];
+	u8 reserved_at_8[0x18];
+	u8 syndrome[0x20];
+	u8 reserved_at_40[0x40];
+};
+
+struct mlx5_ifc_roce_addr_layout_bits {
+	u8 source_l3_address[16][0x8];
+	u8 reserved_at_80[0x3];
+	u8 vlan_valid[0x1];
+	u8 vlan_id[0xc];
+	u8 source_mac_47_32[0x10];
+	u8 source_mac_31_0[0x20];
+	u8 reserved_at_c0[0x14];
+	u8 roce_l3_type[0x4];
+	u8 roce_version[0x8];
+	u8 reserved_at_e0[0x20];
+};
+
+struct mlx5_ifc_set_roce_address_in_bits {
+	u8 opcode[0x10];
+	u8 reserved_at_10[0x10];
+	u8 reserved_at_20[0x10];
+	u8 op_mod[0x10];
+	u8 roce_address_index[0x10];
+	u8 reserved_at_50[0xc];
+	u8 vhca_port_num[0x4];
+	u8 reserved_at_60[0x20];
+	struct mlx5_ifc_roce_addr_layout_bits roce_address;
+};
+
 struct mlx5_ifc_fte_match_set_misc_bits {
 	u8 reserved_at_0[0x8];
 	u8 source_sqn[0x18];
@@ -1706,6 +1738,7 @@ enum {
 	MLX5_CMD_OP_QUERY_SPECIAL_CONTEXTS = 0x203,
 	MLX5_CMD_OP_QUERY_NIC_VPORT_CONTEXT = 0x754,
 	MLX5_CMD_OP_MODIFY_NIC_VPORT_CONTEXT = 0x755,
+	MLX5_CMD_OP_SET_ROCE_ADDRESS       = 0x761,
 	MLX5_CMD_OP_ALLOC_PD               = 0x800,
 	MLX5_CMD_OP_CREATE_TIR             = 0x900,
 	MLX5_CMD_OP_CREATE_TIS             = 0x912,

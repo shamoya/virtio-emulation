@@ -262,12 +262,15 @@ static int mlx5_vdpa_create_flow_table(struct vdpa_priv *priv)
 {
 	uint32_t in[MLX5_ST_SZ_DW(create_flow_table_in)]   = {0};
 	uint32_t out[MLX5_ST_SZ_DW(create_flow_table_out)] = {0};
+	void *ftc;
 	int err;
 
 	MLX5_SET(create_flow_table_in, in, opcode,
 		 MLX5_CMD_OP_CREATE_FLOW_TABLE);
 	MLX5_SET(create_flow_table_in, in, table_type,
 		 MLX5_FLOW_TABLE_TYPE_NIC_RX);
+	ftc = MLX5_ADDR_OF(create_flow_table_in, in ,ftc);
+	MLX5_SET(flow_table_context, ftc, level, 0x1);
 	err = mlx5_mdev_cmd_exec(priv->mctx, in, sizeof(in), out, sizeof(out));
 	if (err || MLX5_GET(create_flow_table_out, out, status)) {
 		DRV_LOG(DEBUG, "Failed to create FLOW Table");

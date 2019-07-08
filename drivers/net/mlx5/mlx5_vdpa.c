@@ -898,28 +898,39 @@ mlx5_vdpa_query_virtio_caps(struct vdpa_priv *priv)
 	return 0;
 }
 
-#define MLX5_VDPA_STATIC_SMAC ("00:22:33:44:55:66")
-#define MLX5_VDPA_STATIC_IP   ("0000:0000:0000:0000:0000:ffff:0101:0101")
-
 static int mlx5_vdpa_set_roce_addr(struct vdpa_priv *priv)
 {
 	uint32_t in[MLX5_ST_SZ_DW(set_roce_address_in)] = {0};
 	uint32_t out[MLX5_ST_SZ_DW(set_roce_address_out)] = {0};
+	uint8_t mac_addr[6];
+	uint32_t ip_addr[4];
 	void *addr = NULL;
 	void *mac = NULL;
 	void *ip = NULL;
 	int gidsz;
 	int err;
 
+	mac_addr[0] = 0x00;
+	mac_addr[1] = 0x22;
+	mac_addr[2] = 0x33;
+	mac_addr[3] = 0x44;
+	mac_addr[4] = 0x55;
+	mac_addr[5] = 0x66;
+
+	ip_addr[0] = 0xdcdcdcdc;
+	ip_addr[1] = 0xdcdcdcdc;
+	ip_addr[2] = 0xdcdcdcdc;
+	ip_addr[3] = rte_cpu_to_be_32(0x11223344);
+
 	MLX5_SET(set_roce_address_in, in, opcode, MLX5_CMD_OP_SET_ROCE_ADDRESS);
 	MLX5_SET(set_roce_address_in, in, roce_address_index, 0x3);
 	addr = MLX5_ADDR_OF(set_roce_address_in, in , roce_address);
 	MLX5_SET(roce_addr_layout, addr, roce_version, 0x2);
 	mac = MLX5_ADDR_OF(roce_addr_layout, addr, source_mac_47_32);
-	memcpy(mac, MLX5_VDPA_STATIC_SMAC, 6);
+	memcpy(mac, mac_addr, 6);
 	ip = MLX5_ADDR_OF(roce_addr_layout, addr, source_l3_address);
 	gidsz = MLX5_FLD_SZ_BYTES(roce_addr_layout, source_l3_address);
-	memcpy(ip, MLX5_VDPA_STATIC_IP, gidsz);
+	memcpy(ip, ip_addr, gidsz);
 	err = mlx5_mdev_cmd_exec(priv->mctx, in, sizeof(in), out, sizeof(out));
 	if (err || MLX5_GET(set_roce_address_out, out, status)) {
 		DRV_LOG(ERR, "Can't SET_ROCE_ADDR");

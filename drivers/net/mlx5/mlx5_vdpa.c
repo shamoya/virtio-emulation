@@ -516,6 +516,27 @@ static int create_split_virtq(struct vdpa_priv *priv, int index,
 	return 0;
 }
 
+static int destroy_split_virtq(struct vdpa_priv *priv, int index)
+{
+	uint32_t in[MLX5_ST_SZ_DW(general_obj_in_cmd_hdr)] = {0};
+	uint32_t out[MLX5_ST_SZ_DW(general_obj_out_cmd_hdr)] = {0};
+	struct virtq_info *info = &priv->virtq[index];
+	int err;
+
+	MLX5_SET(general_obj_in_cmd_hdr, in, opcode,
+			 MLX5_CMD_OP_DESTROY_GENERAL_OBJECT);
+	MLX5_SET(general_obj_in_cmd_hdr, in, obj_type, MLX5_OBJ_TYPE_VIRTQ);
+	MLX5_SET(general_obj_in_cmd_hdr, in, obj_id, info->virtq_id);
+	err = mlx5_mdev_cmd_exec(priv->mctx, in, sizeof(in), out, sizeof(out));
+	if (err || MLX5_GET(general_obj_out_cmd_hdr, out, status)) {
+		DRV_LOG(DEBUG, "Failed to destroy VIRTQ General Obj DEVX");
+		return -1;
+	}
+	info->virtq_id = 0;
+	return 0;
+
+}
+
 static int mlx5_vdpa_setup_rx_steering(struct vdpa_priv *priv)
 {
 	if (create_rqt(priv)) {
@@ -553,6 +574,17 @@ static int mlx5_vdpa_setup_virtqs(struct vdpa_priv *priv)
 	}
 	return 0;
 }
+
+static int mlx5_vdpa_release_virtqs(struct vdpa_priv *priv)
+{
+	int i;
+
+	for (i = 0; i < priv->nr_vring; i++)
+		destroy_split_virtq(priv, i);
+
+	return 0;
+}
+
 
 static int mlx5_vdpa_create_mkey(struct vdpa_priv *priv)
 {
@@ -717,6 +749,23 @@ mlx5_vdpa_setup_notify_relay(struct vdpa_priv *priv)
 }
 
 static int
+mlx5_vdpa_unset_notify_relay(struct vdpa_priv *priv)
+{
+        void *status;
+
+        if (priv->relay.tid) {
+                pthread_cancel(priv->relay.tid);
+                pthread_join(priv->relay.tid, &status);
+        }
+        priv->relay.tid = 0;
+        if (priv->relay.epfd >= 0)
+                close(priv->relay.epfd);
+        priv->relay.epfd = -1;
+        priv->relay.notify_base = NULL;
+        return 0;
+}
+
+static int
 mlx5_vdpa_dma_map(struct vdpa_priv *priv, int do_map)
 {
 	uint32_t i;
@@ -834,10 +883,16 @@ static int mlx5_vdpa_dev_close(int vid)
 		return -1;
 	}
 	priv = list_elem->priv;
+	mlx5_vdpa_unset_notify_relay(priv);
+	if (mlx5_vdpa_release_virtqs(priv)) {
+		DRV_LOG(ERR, "Error in releasing Virtqueue resources");
+		return -1;
+	}
 	if (mlx5_vdpa_dma_map(priv, 0)) {
 		DRV_LOG(ERR, "Error DMA mapping VM memory");
 		return -1;
 	}
+	rte_atomic32_set(&priv->dev_attached, 0);
 	return 0;
 }
 

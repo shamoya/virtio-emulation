@@ -128,6 +128,8 @@ static struct vdpa_priv_list_head priv_list =
 					TAILQ_HEAD_INITIALIZER(priv_list);
 static pthread_mutex_t priv_list_lock = PTHREAD_MUTEX_INITIALIZER;
 
+#define MLX5_VPDA_VFIO_DMA_IOVA_OFFSET (0x400000000)
+
 static inline struct mlx5_mdev_memzone* mlx5_vdpa_vfio_dma(void *owner,
 							   const char *name,
 							   size_t size,
@@ -139,14 +141,14 @@ static inline struct mlx5_mdev_memzone* mlx5_vdpa_vfio_dma(void *owner,
 	void *va = rte_zmalloc(name, size, align);
 	/*
 	 * Since VFIO DMA MAP API requires the user to supply the IOVA,
-	 * we'll be using identity mapping (va==iova) since this PMD is
-	 * only application running on the function.
-	 * TODO(idos): Change to global IOVA address space per function
-	 *
+	 * we'll be using identity + offset mapping (va + offset == iova).
 	 */
-	uint64_t iova = (uint64_t)va;
+	uint64_t iova = (uint64_t)va + MLX5_VPDA_VFIO_DMA_IOVA_OFFSET;
 	rte_vfio_container_dma_map(priv->vfio_container_fd,
 				   (uint64_t)va, iova, size);
+	DRV_LOG(DEBUG, "name %s: HVA 0x%" PRIx64 ", "
+		"GPA 0x%" PRIx64 ", size 0x%" PRIx64 ".", name,
+		(uint64_t)va, iova, size);
 	if(!mz)
 		return mz;
 	mz->addr = va;

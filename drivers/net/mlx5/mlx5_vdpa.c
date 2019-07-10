@@ -81,7 +81,7 @@ struct mlx5_vdpa_caps {
 struct virtq_info {
 	uint32_t virtq_id;
 	uint32_t umem_id;
-	void *umem_buf;
+	struct mlx5_mdev_memzone *umem_buf;
 };
 
 struct mlx5_vdpa_steer_info {
@@ -459,6 +459,7 @@ static int create_split_virtq(struct vdpa_priv *priv, int index,
 		DRV_LOG(ERR, "Error allocating memory for Virt queue");
 		return -1;
 	}
+	info->umem_buf = umem_mz;
 	if (mlx5_vdpa_create_umem(priv, umem_size, umem_mz->phys_addr,
 				 &info->umem_id)) {
 		DRV_LOG(ERR, "Error creating UMEM for Virt queue");

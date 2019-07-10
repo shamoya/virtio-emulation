@@ -157,6 +157,17 @@ static inline struct mlx5_mdev_memzone* mlx5_vdpa_vfio_dma(void *owner,
 	return mz;
 }
 
+static void mlx5_vdpa_vfio_dma_unmap(void *owner, struct mlx5_mdev_memzone *mz)
+{
+	struct vdpa_priv *priv = owner;
+	rte_vfio_container_dma_unmap(priv->vfio_container_fd,
+				     mz->addr_64,
+				     mz->phys_addr,
+				     mz->size);
+	rte_free(mz->addr);
+	rte_free(mz);
+}
+
 static int create_pd(struct vdpa_priv *priv)
 {
 	uint32_t in[MLX5_ST_SZ_DW(alloc_pd_in)] = {0};
@@ -171,6 +182,22 @@ static int create_pd(struct vdpa_priv *priv)
 	}
 	priv->pdn = MLX5_GET(alloc_pd_out, out, pd);
 	DRV_LOG(DEBUG, "Success creating PD 0x%x", priv->pdn);
+	return 0;
+}
+
+static int destroy_pd(struct vdpa_priv *priv)
+{
+	uint32_t in[MLX5_ST_SZ_DW(dealloc_pd_in)] = {0};
+	uint32_t out[MLX5_ST_SZ_DW(dealloc_pd_out)] = {0};
+	int err;
+
+	MLX5_SET(dealloc_pd_in, in, opcode, MLX5_CMD_OP_DEALLOC_PD);
+	MLX5_SET(dealloc_pd_in, in, pd, priv->pdn);
+	err = mlx5_mdev_cmd_exec(priv->mctx, in, sizeof(in), out, sizeof(out));
+	if (err || MLX5_GET(dealloc_pd_out, out, status)) {
+		DRV_LOG(ERR, "PD de-allocation failure");
+		return -1;
+	}
 	return 0;
 }
 
@@ -223,6 +250,22 @@ static int create_rqt(struct vdpa_priv *priv)
 	return 0;
 }
 
+static int destroy_rqt(struct vdpa_priv *priv)
+{
+	uint32_t in[MLX5_ST_SZ_DW(destroy_rqt_in)] = {0};
+	uint32_t out[MLX5_ST_SZ_DW(destroy_rqt_out)] = {0};
+	int err;
+
+	MLX5_SET(destroy_rqt_in, in, opcode, MLX5_CMD_OP_DESTROY_RQT);
+	MLX5_SET(destroy_rqt_in, in, rqtn, priv->rx_steer_info.rqtn);
+	err = mlx5_mdev_cmd_exec(priv->mctx, in, sizeof(in), out, sizeof(out));
+	if (err || MLX5_GET(destroy_rqt_out, out, status)) {
+		DRV_LOG(DEBUG, "Failed to destroy TIR");
+		return -1;
+	}
+	return 0;
+}
+
 #define MLX5_HASH_IP_L4PORTS (MLX5_HASH_FIELD_SEL_SRC_IP   |\
 			      MLX5_HASH_FIELD_SEL_DST_IP   |\
 			      MLX5_HASH_FIELD_SEL_L4_SPORT |\
@@ -261,6 +304,22 @@ static int create_tir(struct vdpa_priv *priv)
 	return 0;
 }
 
+static int destroy_tir(struct vdpa_priv *priv)
+{
+	uint32_t in[MLX5_ST_SZ_DW(destroy_tir_in)] = {0};
+	uint32_t out[MLX5_ST_SZ_DW(destroy_tir_out)] = {0};
+	int err;
+
+	MLX5_SET(destroy_tir_in, in, opcode, MLX5_CMD_OP_DESTROY_TIR);
+	MLX5_SET(destroy_tir_in, in, tirn, priv->rx_steer_info.tirn);
+	err = mlx5_mdev_cmd_exec(priv->mctx, in, sizeof(in), out, sizeof(out));
+	if (err || MLX5_GET(destroy_tir_out, out, status)) {
+		DRV_LOG(DEBUG, "Failed to destroy TIR");
+		return -1;
+	}
+	return 0;
+}
+
 static int mlx5_vdpa_create_flow_table(struct vdpa_priv *priv)
 {
 	uint32_t in[MLX5_ST_SZ_DW(create_flow_table_in)]   = {0};
@@ -284,6 +343,25 @@ static int mlx5_vdpa_create_flow_table(struct vdpa_priv *priv)
 	return 0;
 }
 
+static int mlx5_vdpa_destroy_flow_table(struct vdpa_priv *priv)
+{
+	uint32_t in[MLX5_ST_SZ_DW(destroy_flow_table_in)]   = {0};
+	uint32_t out[MLX5_ST_SZ_DW(destroy_flow_table_out)] = {0};
+	int err;
+
+	MLX5_SET(destroy_flow_table_in, in, opcode,
+		 MLX5_CMD_OP_DESTROY_FLOW_TABLE);
+	MLX5_SET(destroy_flow_table_in, in, table_type,
+		 MLX5_FLOW_TABLE_TYPE_NIC_RX);
+	MLX5_SET(destroy_flow_table_in, in, table_id, priv->rx_steer_info.ftn);
+	err = mlx5_mdev_cmd_exec(priv->mctx, in, sizeof(in), out, sizeof(out));
+	if (err || MLX5_GET(destroy_flow_table_out, out, status)) {
+		DRV_LOG(DEBUG, "Failed to destroy FLOW Table");
+		return -1;
+	}
+	return 0;
+}
+
 static int mlx5_vdpa_create_flow_group(struct vdpa_priv *priv)
 {
 	uint32_t in[MLX5_ST_SZ_DW(create_flow_group_in)] = {0};
@@ -303,6 +381,26 @@ static int mlx5_vdpa_create_flow_group(struct vdpa_priv *priv)
 	priv->rx_steer_info.fgn = MLX5_GET(create_flow_group_out, out,
 					   group_id);
 	DRV_LOG(DEBUG, "Success creating FG 0x%x", priv->rx_steer_info.fgn);
+	return 0;
+}
+
+static int mlx5_vdpa_delete_flow_group(struct vdpa_priv *priv)
+{
+	uint32_t in[MLX5_ST_SZ_DW(destroy_flow_group_in)] = {0};
+	uint32_t out[MLX5_ST_SZ_DW(destroy_flow_group_out)] = {0};
+	int err;
+
+	MLX5_SET(destroy_flow_group_in, in, opcode,
+		 MLX5_CMD_OP_DESTROY_FLOW_GROUP);
+	MLX5_SET(destroy_flow_group_in, in, table_id, priv->rx_steer_info.ftn);
+	MLX5_SET(destroy_flow_group_in, in, table_type,
+		 MLX5_FLOW_TABLE_TYPE_NIC_RX);
+	MLX5_SET(destroy_flow_group_in, in, group_id, priv->rx_steer_info.fgn);
+	err = mlx5_mdev_cmd_exec(priv->mctx, in, sizeof(in), out, sizeof(out));
+	if (err || MLX5_GET(destroy_flow_group_out, out, status)) {
+		DRV_LOG(DEBUG, "Failed to destroy FLOW Group");
+		return -1;
+	}
 	return 0;
 }
 
@@ -332,6 +430,23 @@ static int mlx5_vdpa_set_promisc_fte(struct vdpa_priv *priv)
 	err = mlx5_mdev_cmd_exec(priv->mctx, in, sizeof(in), out, sizeof(out));
 	if (err || MLX5_GET(set_fte_out, out, status)) {
 		DRV_LOG(DEBUG, "Failed to create FTE");
+		return -1;
+	}
+	return 0;
+}
+
+static int mlx5_vdpa_delete_promisc_fte(struct vdpa_priv *priv)
+{
+	uint32_t in[MLX5_ST_SZ_DW(delete_fte_in)] = {0};
+	uint32_t out[MLX5_ST_SZ_DW(delete_fte_out)] = {0};
+	int err;
+
+	MLX5_SET(delete_fte_in, in, opcode, MLX5_CMD_OP_DELETE_FLOW_TABLE_ENTRY);
+	MLX5_SET(delete_fte_in, in, table_id, priv->rx_steer_info.ftn);
+	MLX5_SET(delete_fte_in, in, table_type, MLX5_FLOW_TABLE_TYPE_NIC_RX);
+	err = mlx5_mdev_cmd_exec(priv->mctx, in, sizeof(in), out, sizeof(out));
+	if (err || MLX5_GET(delete_fte_out, out, status)) {
+		DRV_LOG(DEBUG, "Failed to delete FTE");
 		return -1;
 	}
 	return 0;
@@ -371,6 +486,21 @@ static int mlx5_vdpa_enable_promisc(struct vdpa_priv *priv)
 	return 0;
 ft_err:
 	DRV_LOG(DEBUG, "Failure in creating Promiscuous steering");
+	return -1;
+}
+
+static int mlx5_vdpa_delete_promisc(struct vdpa_priv *priv)
+{
+	if (mlx5_vdpa_delete_promisc_fte(priv))
+		goto ft_del_err;
+	if (mlx5_vdpa_delete_flow_group(priv))
+		goto ft_del_err;
+	if (mlx5_vdpa_destroy_flow_table(priv))
+		goto ft_del_err;
+	DRV_LOG(DEBUG, "Success deleting Promiscuous flow rule");
+	return 0;
+ft_del_err:
+	DRV_LOG(DEBUG, "Failure in deleting Promiscuous steering");
 	return -1;
 }
 
@@ -434,6 +564,22 @@ mlx5_vdpa_create_umem(struct vdpa_priv *priv, uint64_t umem_size,
 	}
 
 	*umem_id = MLX5_GET(create_umem_out, out, umem_id);
+	return 0;
+}
+
+static int mlx5_vdpa_destroy_umem(struct vdpa_priv *priv, uint32_t umem_id)
+{
+	uint32_t in[MLX5_ST_SZ_DW(destroy_umem_in)] = {0};
+	uint32_t out[MLX5_ST_SZ_DW(destroy_umem_out)] = {0};
+	int err;
+
+	MLX5_SET(destroy_umem_in, in, opcode, MLX5_CMD_OP_DESTROY_UMEM);
+	MLX5_SET(destroy_umem_in, in, umem_id, umem_id);
+	err = mlx5_mdev_cmd_exec(priv->mctx, in, sizeof(in), out, sizeof(out));
+	if (err || MLX5_GET(destroy_umem_out, out, status)) {
+		DRV_LOG(DEBUG, "Failed to destroy UMEM");
+		return -1;
+	}
 	return 0;
 }
 
@@ -534,6 +680,11 @@ static int destroy_split_virtq(struct vdpa_priv *priv, int index)
 		DRV_LOG(DEBUG, "Failed to destroy VIRTQ General Obj DEVX");
 		return -1;
 	}
+	if (mlx5_vdpa_destroy_umem(priv, info->umem_id)) {
+		DRV_LOG(DEBUG, "Failed to destroy UMEM of VIRTQ");
+		return -1;
+	}
+	mlx5_vdpa_vfio_dma_unmap(priv, info->umem_buf);
 	info->virtq_id = 0;
 	return 0;
 
@@ -551,6 +702,23 @@ static int mlx5_vdpa_setup_rx_steering(struct vdpa_priv *priv)
 	}
 	if (mlx5_vdpa_enable_promisc(priv)) {
 		DRV_LOG(ERR, "Promiscuous flow rule creation failed");
+		return -1;
+	}
+	return 0;
+}
+
+static int mlx5_vdpa_release_rx_steer(struct vdpa_priv *priv)
+{
+	if (mlx5_vdpa_delete_promisc(priv)) {
+		DRV_LOG(ERR, "Deletion of promiscuous flow failed");
+		return -1;
+	}
+	if (destroy_tir(priv)) {
+		DRV_LOG(ERR, "Destroying TIR object failed");
+		return -1;
+	}
+	if (destroy_rqt(priv)) {
+		DRV_LOG(ERR, "Destroyting RQT object failed");
 		return -1;
 	}
 	return 0;
@@ -581,6 +749,10 @@ static int mlx5_vdpa_release_virtqs(struct vdpa_priv *priv)
 {
 	int i;
 
+	if (mlx5_vdpa_release_rx_steer(priv)) {
+		DRV_LOG(ERR, "Error release RX steering resources");
+		return -1;
+	}
 	for (i = 0; i < priv->nr_vring; i++)
 		destroy_split_virtq(priv, i);
 
@@ -614,6 +786,22 @@ static int mlx5_vdpa_create_mkey(struct vdpa_priv *priv)
 	priv->mkey_ix = MLX5_GET(create_mkey_out, out, mkey_index);
 	priv->mkey_ix = (priv->mkey_ix << 8) | MKEY_VARIANT_PART;
 	DRV_LOG(DEBUG, "create mkey success value %d", priv->mkey_ix);
+	return 0;
+}
+
+static int mlx5_vdpa_destroy_mkey(struct vdpa_priv *priv)
+{
+	uint32_t in[MLX5_ST_SZ_DW(destroy_mkey_in)] = {0};
+	uint32_t out[MLX5_ST_SZ_DW(destroy_mkey_out)] = {0};
+	int err;
+
+	MLX5_SET(destroy_mkey_in, in, opcode, MLX5_CMD_OP_DESTROY_MKEY);
+	MLX5_SET(destroy_mkey_in, in, mkey_index, (priv->mkey_ix >> 8));
+	err = mlx5_mdev_cmd_exec(priv->mctx, in, sizeof(in), out, sizeof(out));
+	if (err || MLX5_GET(destroy_mkey_out, out, status)) {
+		DRV_LOG(ERR, "Can't destroy mkey");
+		return -1;
+	}
 	return 0;
 }
 
@@ -810,6 +998,11 @@ mlx5_vdpa_dma_map(struct vdpa_priv *priv, int do_map)
 			DRV_LOG(ERR, "Unable to create PA MKEY");
 			goto error;
 		}
+	} else {
+		if (mlx5_vdpa_destroy_mkey(priv)) {
+			DRV_LOG(ERR, "Unable to create PA MKEY");
+			goto error;
+		}
 	}
 	return 0;
 error:
@@ -833,6 +1026,22 @@ mlx5_vdpa_create_tis(struct vdpa_priv *priv)
 	}
 	priv->tisn = MLX5_GET(create_tis_out, out, tisn);
 	DRV_LOG(DEBUG, "Success creating TIS 0x%x", priv->tisn);
+	return 0;
+}
+
+static int mlx5_vdpa_destroy_tis(struct vdpa_priv *priv)
+{
+	uint32_t in[MLX5_ST_SZ_DW(destroy_tis_in)] = {0};
+	uint32_t out[MLX5_ST_SZ_DW(destroy_tis_out)] = {0};
+	int err;
+
+	MLX5_SET(destroy_tis_in, in, opcode, MLX5_CMD_OP_DESTROY_TIS);
+	MLX5_SET(destroy_tis_in, in, tisn, priv->tisn);
+	err = mlx5_mdev_cmd_exec(priv->mctx, in, sizeof(in), out, sizeof(out));
+	if (err || MLX5_GET(destroy_tis_out, out, status)) {
+		DRV_LOG(ERR, "Can't destroy TIS");
+		return -1;
+	}
 	return 0;
 }
 
@@ -892,6 +1101,14 @@ static int mlx5_vdpa_dev_close(int vid)
 	}
 	if (mlx5_vdpa_dma_map(priv, 0)) {
 		DRV_LOG(ERR, "Error DMA mapping VM memory");
+		return -1;
+	}
+	if (mlx5_vdpa_destroy_tis(priv)) {
+		DRV_LOG(ERR, "Error Destroying TIS");
+		return -1;
+	}
+	if (destroy_pd(priv)) {
+		DRV_LOG(ERR, "Error Deallocating PD");
 		return -1;
 	}
 	rte_atomic32_set(&priv->dev_attached, 0);

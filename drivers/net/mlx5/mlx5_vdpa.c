@@ -186,23 +186,6 @@ static int create_pd(struct vdpa_priv *priv)
 	return 0;
 }
 
-static int destroy_pd(struct vdpa_priv *priv)
-{
-	uint32_t in[MLX5_ST_SZ_DW(dealloc_pd_in)] = {0};
-	uint32_t out[MLX5_ST_SZ_DW(dealloc_pd_out)] = {0};
-	int err;
-
-	MLX5_SET(dealloc_pd_in, in, opcode, MLX5_CMD_OP_DEALLOC_PD);
-	MLX5_SET(dealloc_pd_in, in, pd, priv->pdn);
-	err = mlx5_mdev_cmd_exec(priv->mctx, in, sizeof(in), out, sizeof(out));
-	if (err || MLX5_GET(dealloc_pd_out, out, status)) {
-		DRV_LOG(ERR, "PD de-allocation failure");
-		return -1;
-	}
-	priv->pdn = -1;
-	return 0;
-}
-
 /*
  * According to VIRTIO_NET Spec the virtqueues index identity its type by:
  * 0 receiveq1
@@ -1082,10 +1065,6 @@ mlx5_vdpa_dev_config(int vid)
 	}
 	priv = list_elem->priv;
 	priv->vid = vid;
-	if (create_pd(priv)) {
-		DRV_LOG(ERR, "Error allocating PD");
-		return -1;
-	}
 	if (mlx5_vdpa_create_tis(priv)) {
 		DRV_LOG(ERR, "Error creating TIS");
 		return -1;
@@ -1128,12 +1107,6 @@ static int mlx5_vdpa_dev_close(int vid)
 	if (priv->tisn >= 0) {
 		if (mlx5_vdpa_destroy_tis(priv)) {
 			DRV_LOG(ERR, "Error Destroying TIS");
-			return -1;
-		}
-	}
-	if (priv->pdn >= 0) {
-		if (destroy_pd(priv)) {
-			DRV_LOG(ERR, "Error Deallocating PD");
 			return -1;
 		}
 	}
@@ -1288,6 +1261,10 @@ static int mlx5_vdpa_init_device(struct vdpa_priv *priv)
 	}
 	if (mlx5_vdpa_set_roce_addr(priv)) {
 		DRV_LOG(ERR, "failed to set up roce addr");
+		return -1;
+	}
+	if (create_pd(priv)) {
+		DRV_LOG(ERR, "Error allocating PD");
 		return -1;
 	}
 	return 0;

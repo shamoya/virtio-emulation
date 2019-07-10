@@ -79,16 +79,16 @@ struct mlx5_vdpa_caps {
 };
 
 struct virtq_info {
-	uint32_t virtq_id;
-	uint32_t umem_id;
+	int virtq_id;
+	int umem_id;
 	struct mlx5_mdev_memzone *umem_buf;
 };
 
 struct mlx5_vdpa_steer_info {
-	uint32_t tirn;
-	uint32_t rqtn;
-	uint32_t ftn;
-	uint32_t fgn;
+	int tirn;
+	int rqtn;
+	int ftn;
+	int fgn;
 };
 
 struct mlx5_vdpa_relay_thread {
@@ -103,9 +103,9 @@ struct vdpa_priv {
 	int                           vfio_container_fd;
 	int                           vfio_group_fd;
 	int                           vfio_dev_fd;
-	uint32_t                      pdn;
-	uint32_t                      tisn;
-	uint32_t                      mkey_ix;
+	int                           pdn;
+	int                           tisn;
+	int                           mkey_ix;
 	uint16_t                      nr_vring;
 	rte_atomic32_t                dev_attached;
 	struct rte_pci_device         *pdev;
@@ -177,7 +177,8 @@ static int create_pd(struct vdpa_priv *priv)
 	MLX5_SET(alloc_pd_in, in, opcode, MLX5_CMD_OP_ALLOC_PD);
 	err = mlx5_mdev_cmd_exec(priv->mctx, in, sizeof(in), out, sizeof(out));
 	if (err || MLX5_GET(alloc_pd_out, out, status)) {
-		DRV_LOG(ERR, "PD allocation failure");
+		DRV_LOG(ERR, "PD allocation failure syndrme 0x%x",
+			MLX5_GET(alloc_pd_out, out, syndrome));
 		return -1;
 	}
 	priv->pdn = MLX5_GET(alloc_pd_out, out, pd);
@@ -198,6 +199,7 @@ static int destroy_pd(struct vdpa_priv *priv)
 		DRV_LOG(ERR, "PD de-allocation failure");
 		return -1;
 	}
+	priv->pdn = -1;
 	return 0;
 }
 
@@ -263,6 +265,7 @@ static int destroy_rqt(struct vdpa_priv *priv)
 		DRV_LOG(DEBUG, "Failed to destroy TIR");
 		return -1;
 	}
+	priv->rx_steer_info.rqtn = -1;
 	return 0;
 }
 
@@ -317,6 +320,7 @@ static int destroy_tir(struct vdpa_priv *priv)
 		DRV_LOG(DEBUG, "Failed to destroy TIR");
 		return -1;
 	}
+	priv->rx_steer_info.tirn = -1;
 	return 0;
 }
 
@@ -359,6 +363,7 @@ static int mlx5_vdpa_destroy_flow_table(struct vdpa_priv *priv)
 		DRV_LOG(DEBUG, "Failed to destroy FLOW Table");
 		return -1;
 	}
+	priv->rx_steer_info.ftn = -1;
 	return 0;
 }
 
@@ -401,6 +406,7 @@ static int mlx5_vdpa_delete_flow_group(struct vdpa_priv *priv)
 		DRV_LOG(DEBUG, "Failed to destroy FLOW Group");
 		return -1;
 	}
+	priv->rx_steer_info.fgn = -1;
 	return 0;
 }
 
@@ -491,12 +497,18 @@ ft_err:
 
 static int mlx5_vdpa_delete_promisc(struct vdpa_priv *priv)
 {
-	if (mlx5_vdpa_delete_promisc_fte(priv))
-		goto ft_del_err;
-	if (mlx5_vdpa_delete_flow_group(priv))
-		goto ft_del_err;
-	if (mlx5_vdpa_destroy_flow_table(priv))
-		goto ft_del_err;
+	if (priv->rx_steer_info.fgn >= 0) {
+		if (mlx5_vdpa_delete_promisc_fte(priv))
+			goto ft_del_err;
+	}
+	if (priv->rx_steer_info.fgn >= 0) {
+		if (mlx5_vdpa_delete_flow_group(priv))
+			goto ft_del_err;
+	}
+	if (priv->rx_steer_info.ftn >= 0) {
+		if (mlx5_vdpa_destroy_flow_table(priv))
+			goto ft_del_err;
+	}
 	DRV_LOG(DEBUG, "Success deleting Promiscuous flow rule");
 	return 0;
 ft_del_err:
@@ -530,7 +542,7 @@ exit:
 
 static int
 mlx5_vdpa_create_umem(struct vdpa_priv *priv, uint64_t umem_size,
-		      uint64_t iova, uint32_t *umem_id)
+		      uint64_t iova, int *umem_id)
 {
 	uint32_t in[MLX5_ST_SZ_DW(create_umem_in)] = {0};
 	uint32_t out[MLX5_ST_SZ_DW(create_umem_out)] = {0};
@@ -685,7 +697,8 @@ static int destroy_split_virtq(struct vdpa_priv *priv, int index)
 		return -1;
 	}
 	mlx5_vdpa_vfio_dma_unmap(priv, info->umem_buf);
-	info->virtq_id = 0;
+	info->virtq_id = -1;
+	info->umem_id = -1;
 	return 0;
 
 }
@@ -713,13 +726,17 @@ static int mlx5_vdpa_release_rx_steer(struct vdpa_priv *priv)
 		DRV_LOG(ERR, "Deletion of promiscuous flow failed");
 		return -1;
 	}
-	if (destroy_tir(priv)) {
-		DRV_LOG(ERR, "Destroying TIR object failed");
-		return -1;
+	if (priv->rx_steer_info.tirn >= 0) {
+		if (destroy_tir(priv)) {
+			DRV_LOG(ERR, "Destroying TIR object failed");
+			return -1;
+		}
 	}
-	if (destroy_rqt(priv)) {
-		DRV_LOG(ERR, "Destroyting RQT object failed");
-		return -1;
+	if (priv->rx_steer_info.rqtn >= 0) {
+		if (destroy_rqt(priv)) {
+			DRV_LOG(ERR, "Destroyting RQT object failed");
+			return -1;
+		}
 	}
 	return 0;
 }
@@ -753,9 +770,10 @@ static int mlx5_vdpa_release_virtqs(struct vdpa_priv *priv)
 		DRV_LOG(ERR, "Error release RX steering resources");
 		return -1;
 	}
-	for (i = 0; i < priv->nr_vring; i++)
-		destroy_split_virtq(priv, i);
-
+	for (i = 0; i < priv->nr_vring; i++) {
+		if (priv->virtq[i].virtq_id >= 0)
+			destroy_split_virtq(priv, i);
+	}
 	return 0;
 }
 
@@ -802,6 +820,7 @@ static int mlx5_vdpa_destroy_mkey(struct vdpa_priv *priv)
 		DRV_LOG(ERR, "Can't destroy mkey");
 		return -1;
 	}
+	priv->mkey_ix = -1;
 	return 0;
 }
 
@@ -999,9 +1018,11 @@ mlx5_vdpa_dma_map(struct vdpa_priv *priv, int do_map)
 			goto error;
 		}
 	} else {
-		if (mlx5_vdpa_destroy_mkey(priv)) {
-			DRV_LOG(ERR, "Unable to create PA MKEY");
-			goto error;
+		if (priv->mkey_ix >= 0) {
+			if (mlx5_vdpa_destroy_mkey(priv)) {
+				DRV_LOG(ERR, "Unable to create PA MKEY");
+				goto error;
+			}
 		}
 	}
 	return 0;
@@ -1042,6 +1063,7 @@ static int mlx5_vdpa_destroy_tis(struct vdpa_priv *priv)
 		DRV_LOG(ERR, "Can't destroy TIS");
 		return -1;
 	}
+	priv->tisn = -1;
 	return 0;
 }
 
@@ -1103,13 +1125,17 @@ static int mlx5_vdpa_dev_close(int vid)
 		DRV_LOG(ERR, "Error DMA mapping VM memory");
 		return -1;
 	}
-	if (mlx5_vdpa_destroy_tis(priv)) {
-		DRV_LOG(ERR, "Error Destroying TIS");
-		return -1;
+	if (priv->tisn >= 0) {
+		if (mlx5_vdpa_destroy_tis(priv)) {
+			DRV_LOG(ERR, "Error Destroying TIS");
+			return -1;
+		}
 	}
-	if (destroy_pd(priv)) {
-		DRV_LOG(ERR, "Error Deallocating PD");
-		return -1;
+	if (priv->pdn >= 0) {
+		if (destroy_pd(priv)) {
+			DRV_LOG(ERR, "Error Deallocating PD");
+			return -1;
+		}
 	}
 	rte_atomic32_set(&priv->dev_attached, 0);
 	return 0;
@@ -1281,6 +1307,25 @@ static struct rte_vdpa_dev_ops mlx5_vdpa_ops = {
 	.get_notify_area = NULL,
 };
 
+static void mlx5_vdpa_init_resourse_values(struct vdpa_priv *priv)
+{
+	int i;
+	struct virtq_info *info;
+
+	priv->pdn = -1;
+	priv->tisn = -1;
+	priv->mkey_ix = -1;
+	for (i = 0; i < MLX5_VDPA_SW_MAX_VIRTQS_SUPPORTED; i++) {
+		info = &priv->virtq[i];
+		info->virtq_id = -1;
+		info->umem_id = -1;
+	}
+	priv->rx_steer_info.ftn = -1;
+	priv->rx_steer_info.fgn = -1;
+	priv->rx_steer_info.rqtn = -1;
+	priv->rx_steer_info.tirn = -1;
+}
+
 /**
  * DPDK callback to register a PCI device.
  *
@@ -1329,6 +1374,8 @@ mlx5_vdpa_pci_probe(struct rte_pci_driver *pci_drv __rte_unused,
 		rte_errno = rte_errno ? rte_errno : EINVAL;
 		goto error;
 	}
+
+	mlx5_vdpa_init_resourse_values(priv);
 	priv_list_elem->priv = priv;
 	priv->id = rte_vdpa_register_device(&priv->dev_addr,
 					     &mlx5_vdpa_ops);

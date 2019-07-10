@@ -153,6 +153,7 @@ static inline struct mlx5_mdev_memzone* mlx5_vdpa_vfio_dma(void *owner,
 		return mz;
 	mz->addr = va;
 	mz->phys_addr = iova;
+	mz->size = size;
 	return mz;
 }
 

@@ -916,6 +916,7 @@ mlx5_vdpa_query_virtio_caps(struct vdpa_priv *priv)
 	uint32_t in[MLX5_ST_SZ_DW(query_hca_cap_in)] = {0};
 	uint32_t out[MLX5_ST_SZ_DW(query_hca_cap_out)] = {0};
 	void *cap = NULL;
+	int num_eqs;
 
 	MLX5_SET(query_hca_cap_in, in, opcode, MLX5_CMD_OP_QUERY_HCA_CAP);
 	MLX5_SET(query_hca_cap_in, in, op_mod,
@@ -927,6 +928,10 @@ mlx5_vdpa_query_virtio_caps(struct vdpa_priv *priv)
 		return -1;
 	}
 	cap = MLX5_ADDR_OF(query_hca_cap_out, out, capability);
+	num_eqs = MLX5_GET(cmd_hca_cap, cap, max_num_eqs);
+	if (!num_eqs)
+		num_eqs = (1 << MLX5_GET(cmd_hca_cap, cap, log_max_eq));
+	DRV_LOG(DEBUG, "Number of EQs: %d", num_eqs);
 	if (MLX5_GET64(cmd_hca_cap, cap, general_obj_types) &
 	    MLX5_GENERAL_OBJ_TYPES_CAP_VIRTQ) {
 		DRV_LOG(DEBUG, "Virtio acceleration supported by the device!");

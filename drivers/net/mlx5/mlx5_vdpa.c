@@ -1336,6 +1336,7 @@ mlx5_vdpa_pci_probe(struct rte_pci_driver *pci_drv __rte_unused,
 	priv->pdev = pci_dev;
 	priv->dev_addr.pci_addr = pci_dev->addr;
 	priv->dev_addr.type = PCI_ADDR;
+	mlx5_vdpa_init_resourse_values(priv);
 	if (mlx5_vdpa_vfio_setup(priv)) {
 		DRV_LOG(DEBUG, "Unable to init VFIO setup");
 		rte_errno = rte_errno ? rte_errno : EINVAL;
@@ -1351,8 +1352,6 @@ mlx5_vdpa_pci_probe(struct rte_pci_driver *pci_drv __rte_unused,
 		rte_errno = rte_errno ? rte_errno : EINVAL;
 		goto error;
 	}
-
-	mlx5_vdpa_init_resourse_values(priv);
 	priv_list_elem->priv = priv;
 	priv->id = rte_vdpa_register_device(&priv->dev_addr,
 					     &mlx5_vdpa_ops);

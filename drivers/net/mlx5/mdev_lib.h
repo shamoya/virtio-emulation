@@ -28,6 +28,7 @@ struct mlx5_mdev_extra_mailbox_space {
 };
 
 struct mlx5_mdev_memzone {
+	uint64_t size;
 	uint64_t phys_addr;
 	union {
 		void *addr;                   /**< Start virtual address. */

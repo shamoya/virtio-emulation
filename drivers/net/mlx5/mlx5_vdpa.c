@@ -135,6 +135,7 @@ struct mlx5_vdpa_query_mr_list {
 struct vdpa_priv {
 	int                           id; /* vDPA device id. */
 	int                           vid; /* virtio_net driver id */
+	uint16_t                      gvmi;
 	struct mlx5_vdpa_devx_obj     pd;
 	struct mlx5_vdpa_devx_obj     tis;
 	uint32_t                      gpa_mkey_index;
@@ -400,7 +401,7 @@ create_split_virtq(struct vdpa_priv *priv, int index,
 	MLX5_SET(virtq, virtq, ctrl_mkey, priv->gpa_mkey_index);
 	MLX5_SET(virtq, virtq, umem_id, info->umem_obj->umem_id);
 	MLX5_SET(virtq, virtq, tisn, priv->tis.id);
-	MLX5_SET(virtq, virtq, doorbell_stride_idx, index);
+	MLX5_SET(virtq, virtq, doorbell_stride_idx, ((priv->gvmi << 4 ) | index));
 	virtq_obj = mlx5_glue->dv_devx_obj_create(priv->ctx, in, sizeof(in),
 						  out, sizeof(out));
 	if (!virtq_obj) {
@@ -755,7 +756,7 @@ mlx5_vdpa_notify_queue(struct vdpa_priv *priv, int qid __rte_unused)
 	 * Write must be 4B in length in order to pass the device PCI.
 	 * need to further investigate the root cause.
 	 */
-	rte_write32(qid, priv->relay.notify_base);
+	rte_write32(((priv->gvmi << 4 ) | qid), priv->relay.notify_base);
 }
 
 static void *
@@ -1150,6 +1151,7 @@ mlx5_vdpa_query_virtio_caps(struct vdpa_priv *priv)
 		return -1;
 	}
 	cap = MLX5_ADDR_OF(query_hca_cap_out, out, capability);
+	priv->gvmi = MLX5_GET(cmd_hca_cap, cap, vhca_id);
 	/*
 	 * TODO (idos): Once we have FW support, exit if not supported
 	 */
@@ -1173,7 +1175,7 @@ mlx5_vdpa_query_virtio_caps(struct vdpa_priv *priv)
 	}
 	priv->caps.virtio_net_features = MLX5_VDPA_FEATURES;
 	priv->caps.virtio_protocol_features = MLX5_VDPA_PROTOCOL_FEATURES;
-	DRV_LOG(DEBUG, "Virtio Caps:");
+	DRV_LOG(DEBUG, "Virtio Caps (gvmi 0x%x):", priv->gvmi);
 	DRV_LOG(DEBUG, "	dump_mkey=0x%x ", priv->caps.dump_mkey);
 	DRV_LOG(DEBUG, "	max_num_virtqs=0x%x ",
 			priv->caps.max_num_virtqs);

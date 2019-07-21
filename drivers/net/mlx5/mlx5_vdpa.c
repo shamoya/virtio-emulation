@@ -106,6 +106,7 @@ struct vdpa_priv {
 	int                           pdn;
 	int                           tisn;
 	int                           mkey_ix;
+	uint16_t                      gvmi;
 	uint16_t                      nr_vring;
 	rte_atomic32_t                dev_attached;
 	struct rte_pci_device         *pdev;
@@ -155,6 +156,11 @@ static inline struct mlx5_mdev_memzone* mlx5_vdpa_vfio_dma(void *owner,
 	mz->phys_addr = iova;
 	mz->size = size;
 	return mz;
+}
+
+static inline uint16_t mlx5_vdpa_global_db_index(struct vdpa_priv *priv, uint16_t qid)
+{
+	return ((priv->gvmi << 4 ) | qid);
 }
 
 static void mlx5_vdpa_vfio_dma_unmap(void *owner, struct mlx5_mdev_memzone *mz)
@@ -648,7 +654,8 @@ static int create_split_virtq(struct vdpa_priv *priv, int index,
 	MLX5_SET(virtq, virtq, ctrl_mkey, priv->mkey_ix);
 	MLX5_SET(virtq, virtq, umem_id, info->umem_id);
 	MLX5_SET(virtq, virtq, tisn, priv->tisn);
-	MLX5_SET(virtq, virtq, doorbell_stride_idx, index);
+	MLX5_SET(virtq, virtq, doorbell_stride_idx,
+		 mlx5_vdpa_global_db_index(priv, index));
 	err = mlx5_mdev_cmd_exec(priv->mctx, in, sizeof(in), out, sizeof(out));
 	if (err || MLX5_GET(general_obj_out_cmd_hdr, out, status)) {
 		DRV_LOG(DEBUG, "Failed to create VIRTQ General Obj DEVX");
@@ -855,13 +862,14 @@ mlx5_vdpa_get_vdpa_features(int did, uint64_t *features)
 }
 
 static void
-mlx5_vdpa_notify_queue(struct vdpa_priv *priv, int qid __rte_unused)
+mlx5_vdpa_notify_queue(struct vdpa_priv *priv, int qid)
 {
 	/*
 	 * Write must be 4B in length in order to pass the device PCI.
 	 * need to further investigate the root cause.
 	 */
-	rte_write32(qid, priv->relay.notify_base);
+	rte_write32(mlx5_vdpa_global_db_index(priv, qid),
+		    priv->relay.notify_base);
 }
 
 static void *
@@ -1150,6 +1158,8 @@ mlx5_vdpa_query_virtio_caps(struct vdpa_priv *priv)
 	if (!num_eqs)
 		num_eqs = (1 << MLX5_GET(cmd_hca_cap, cap, log_max_eq));
 	DRV_LOG(DEBUG, "Number of EQs: %d", num_eqs);
+	priv->gvmi = MLX5_GET(cmd_hca_cap, cap, vhca_id);
+	DRV_LOG(DEBUG, "VF GVMI: %d", priv->gvmi);
 	if (MLX5_GET64(cmd_hca_cap, cap, general_obj_types) &
 	    MLX5_GENERAL_OBJ_TYPES_CAP_VIRTQ) {
 		DRV_LOG(DEBUG, "Virtio acceleration supported by the device!");
@@ -1195,7 +1205,7 @@ static int mlx5_vdpa_set_roce_addr(struct vdpa_priv *priv)
 	mac_addr[2] = 0x33;
 	mac_addr[3] = 0x44;
 	mac_addr[4] = 0x55;
-	mac_addr[5] = 0x66;
+	mac_addr[5] = (0x5a + priv->gvmi);
 
 	ip_addr[0] = 0xdcdcdcdc;
 	ip_addr[1] = 0xdcdcdcdc;
@@ -1257,10 +1267,6 @@ static int mlx5_vdpa_init_device(struct vdpa_priv *priv)
 				      drv_ver, mlx5_vdpa_vfio_dma);
 	if (!priv->mctx) {
 		DRV_LOG(ERR, "failed to start up device via mdev");
-		return -1;
-	}
-	if (mlx5_vdpa_set_roce_addr(priv)) {
-		DRV_LOG(ERR, "failed to set up roce addr");
 		return -1;
 	}
 	if (create_pd(priv)) {
@@ -1350,6 +1356,10 @@ mlx5_vdpa_pci_probe(struct rte_pci_driver *pci_drv __rte_unused,
 	if (mlx5_vdpa_query_virtio_caps(priv)) {
 		DRV_LOG(DEBUG, "Unable to query Virtio caps");
 		rte_errno = rte_errno ? rte_errno : EINVAL;
+		goto error;
+	}
+	if (mlx5_vdpa_set_roce_addr(priv)) {
+		DRV_LOG(ERR, "failed to set up roce addr");
 		goto error;
 	}
 	priv_list_elem->priv = priv;
